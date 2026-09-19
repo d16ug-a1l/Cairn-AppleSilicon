@@ -65,6 +65,9 @@ Dockerfile, docker-compose.yaml  # app image + two-service deployment
 cairn.sh                      # host helper: start/stop/restart/status/logs for server +
                               # dispatcher (auto-starts OrbStack/Docker on macOS, logs and
                               # pids in .run/, cleans up leftover worker containers on stop)
+build.sh                      # one-shot project setup: env checks (auto-starts OrbStack),
+                              # uv sync, worker image pull via NJU mirror + retag,
+                              # dispatch.yaml init from example, pytest verification
 ```
 
 ## Build, run, and test commands
@@ -87,6 +90,9 @@ uv run --project cairn cairn dispatch --config dispatch.yaml --startup-healthche
 
 # Host convenience script (macOS/Linux): manage server + dispatcher together
 ./cairn.sh start|stop|restart|status|logs
+
+# One-shot project setup (deps, worker image, config init, tests)
+./build.sh
 ```
 
 Deployment: `docker compose up --build` starts `cairn-server` (port 8000, data persisted to `./datas/cairn/`) and `cairn-dispatcher` (mounts the host Docker socket and `./dispatch.yaml`, waits for the server healthcheck). The app image's base defaults to the NJU GHCR mirror (override with `--build-arg UV_BASE=...`). The worker image must be pulled separately (NJU mirror + retag to the canonical name): `docker pull --platform=linux/amd64 ghcr.nju.edu.cn/oritera/cairn-worker-container:latest && docker tag ghcr.nju.edu.cn/oritera/cairn-worker-container:latest ghcr.io/oritera/cairn-worker-container:latest`. The worker image itself is built from `container/` (`docker build . -t cairn-worker-container`).

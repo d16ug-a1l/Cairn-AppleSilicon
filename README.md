@@ -138,6 +138,15 @@ Worker 也可以不跑在容器里，而是直接运行在 Dispatcher 所在的�
 - [OrbStack](https://orbstack.dev/) —— 在 macOS 上提供 Docker 环境（仅容器执行模式需要；本地模式不需要）
 - Python ≥ 3.12
 
+### 一键构建（推荐）
+
+```bash
+./build.sh
+```
+
+自动完成：环境检查（自动拉起 OrbStack）→ 安装 Python 依赖（PyPI 走阿里云镜像）→ 通过国内镜像站拉取 worker 镜像 → 从 `dispatch.example.yaml` 创建 `dispatch.yaml` → 运行测试验证。构建完成后编辑 `dispatch.yaml` 填入 LLM 端点和 API key，然后 `./cairn.sh start` 即可启动。
+
+以下为手动分步方式：
 
 ### 拉取所需镜像
  
