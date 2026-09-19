@@ -144,7 +144,7 @@ Worker 也可以不跑在容器里，而是直接运行在 Dispatcher 所在的�
 ./build.sh
 ```
 
-自动完成：环境检查（自动拉起 OrbStack）→ 安装 Python 依赖（PyPI 走阿里云镜像）→ 通过国内镜像站拉取 worker 镜像 → 从 `dispatch.example.yaml` 创建 `dispatch.yaml` → 运行测试验证。构建完成后编辑 `dispatch.yaml` 填入 LLM 端点和 API key，然后 `./cairn.sh start` 即可启动。
+自动完成：环境检查（缺失的 git / uv / OrbStack 自动通过 Homebrew 安装，并自动拉起 OrbStack）→ 安装 Python 依赖（PyPI 走阿里云镜像）→ 通过国内镜像站拉取 worker 镜像 → 从 `dispatch.example.yaml` 创建 `dispatch.yaml` → 运行测试验证。构建完成后编辑 `dispatch.yaml` 填入 LLM 端点和 API key，然后 `./cairn.sh start` 即可启动。
 
 以下为手动分步方式：
 

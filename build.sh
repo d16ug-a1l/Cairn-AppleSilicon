@@ -15,13 +15,34 @@ FORCE_PULL=0
 
 step() { echo; echo "── $1 ──"; }
 
-# 1. 环境检查
+# 1. 环境检查（缺失的依赖自动通过 Homebrew 安装）
 step "1/5 环境检查"
-if ! command -v uv >/dev/null 2>&1; then
-  echo "[!] 未找到 uv，请先安装: brew install uv（或参考 https://docs.astral.sh/uv/）"
+if ! command -v brew >/dev/null 2>&1; then
+  echo "[!] 未找到 Homebrew，请先安装: https://brew.sh"
   exit 1
 fi
+
+brew_install() {  # brew_install <命令> <brew 包名> [cask]
+  local cmd="$1" pkg="$2" cask="${3:-}"
+  if command -v "$cmd" >/dev/null 2>&1; then
+    echo "[+] $cmd 已安装"
+    return 0
+  fi
+  echo "[*] 未找到 $cmd，使用 brew 安装 $pkg ..."
+  if [ "$cask" = "cask" ]; then
+    brew install --cask "$pkg"
+  else
+    brew install "$pkg"
+  fi
+}
+
+brew_install git git
+brew_install uv uv
 echo "[+] uv $(uv --version | awk '{print $2}')"
+
+# OrbStack 提供 Docker 环境；docker CLI 由 OrbStack 安装时一并提供
+brew_install orb orbstack cask
+echo "[+] OrbStack 已安装"
 
 if ! docker info >/dev/null 2>&1; then
   echo "[*] Docker 未运行，尝试启动 OrbStack..."

@@ -65,9 +65,10 @@ Dockerfile, docker-compose.yaml  # app image + two-service deployment
 cairn.sh                      # host helper: start/stop/restart/status/logs for server +
                               # dispatcher (auto-starts OrbStack/Docker on macOS, logs and
                               # pids in .run/, cleans up leftover worker containers on stop)
-build.sh                      # one-shot project setup: env checks (auto-starts OrbStack),
-                              # uv sync, worker image pull via NJU mirror + retag,
-                              # dispatch.yaml init from example, pytest verification
+build.sh                      # one-shot project setup: env checks (brew-installs missing
+                              # git/uv/OrbStack, auto-starts OrbStack), uv sync, worker
+                              # image pull via NJU mirror + retag, dispatch.yaml init
+                              # from example, pytest verification
 ```
 
 ## Build, run, and test commands
