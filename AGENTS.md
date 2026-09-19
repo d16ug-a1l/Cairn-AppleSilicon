@@ -124,7 +124,7 @@ Runtime config is a single `dispatch.yaml` (see `dispatch.example.yaml`). `confi
 
 ## Code style guidelines
 
-- English for all Python source, comments, prompts, and README. The design specs under `docs/specs/`, the worker-environment briefing in `container/AGENTS.md`, and the user-facing output of `cairn.sh` are in Chinese — keep them in Chinese when editing.
+- English for all Python source, comments, and prompts. README.md, the design specs under `docs/specs/`, the development guide under `docs/`, the worker-environment briefing in `container/AGENTS.md`, and the user-facing output of `cairn.sh` are in Chinese — keep them in Chinese when editing.
 - `from __future__ import annotations` at the top of modules; pydantic models for config and protocol data; stdlib `logging` with lazy `%s` args; type hints throughout.
 - Minimal comments; the few that exist explain non-obvious design decisions (e.g. intentional couplings) — preserve that convention.
 - No formatter/linter is configured; match surrounding code (4-space indent, double-quoted strings).
