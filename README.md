@@ -2,7 +2,7 @@
 
 <img src="./README/banner.png" alt="Cairn Banner"/>
 
-# Cairn
+# Cairn-AppleSilicon
 ### More Than Just AI Penetration Testing — Towards General State-Space Search
 
 <p>
@@ -29,6 +29,8 @@ Cairn is a general-purpose problem-solving engine. <br/>It defines no roles, no 
 </p>
 
 </div>
+
+> **About this repository**: Cairn-AppleSilicon is adapted from [oritera/Cairn](https://github.com/oritera/Cairn) for **macOS on Apple Silicon (M-series chips)**. Docker is provided by [OrbStack](https://orbstack.dev/) — please install OrbStack before getting started. The web UI has also been localized into Simplified Chinese. For the original project, see the upstream repository.
 
 <p align="center">
   <a href="https://www.bilibili.com/video/BV1a8R5BhEVi/" target="_blank" rel="noopener noreferrer">
@@ -132,9 +134,9 @@ Supported worker backends: **Claude Code**, **Codex**, and **Pi**.
 
 **Prerequisites**
  
-- macOS or Linux
+- macOS on Apple Silicon (M-series chips)
+- [OrbStack](https://orbstack.dev/) — provides Docker on macOS (container execution only — not needed for local mode)
 - Python ≥ 3.12
-- Docker (container execution only — not needed for local mode)
 
 
 ### Pull required images
