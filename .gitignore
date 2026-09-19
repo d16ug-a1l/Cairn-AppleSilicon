@@ -1,0 +1,18 @@
+# User-supplied config with LLM API keys — never commit
+dispatch.yaml
+
+# Runtime state
+.run/
+datas/
+*.db
+*.db-wal
+*.db-shm
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
