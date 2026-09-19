@@ -11,7 +11,7 @@ The repo has two deliverables:
 - **`cairn/`** — the Python application (package `cairn`, version 0.2.1), containing:
   - **Cairn Server** (`src/cairn/server/`) — FastAPI + SQLite truth source. Maintains graph consistency only; does no reasoning. Serves the protocol API and a static web UI (Cytoscape-based graph view in `server/static/`).
   - **Cairn Dispatcher** (`src/cairn/dispatcher/`) — client executor: reads the graph, schedules tasks, manages per-project worker containers (or local processes), and is the **sole protocol writer**. Agents never call the Cairn API directly.
-- **`container/`** — the worker container image (Kali Linux + pentest tooling + pinned `claude` / `codex` / `pi` agent CLIs + Playwright), built separately and published as `ghcr.io/oritera/cairn-worker-container:latest`. The Dockerfile supports mirror/proxy build args (`KALI_MIRROR`, `PIP_INDEX_URL`, `GH_PROXY`, `NPM_REGISTRY`) and multi-arch (`TARGETARCH`) builds.
+- **`container/`** — the worker container image (Kali Linux + pentest tooling + pinned `claude` / `codex` / `pi` agent CLIs + Playwright), built separately and published as `ghcr.io/oritera/cairn-worker-container:latest`. The Dockerfile's mirror/proxy build args (`KALI_MIRROR`, `PIP_INDEX_URL`, `GH_PROXY`, `NPM_REGISTRY`, `PLAYWRIGHT_DOWNLOAD_HOST`) default to China mirrors (Aliyun, npmmirror, gh-proxy.com) — pass empty values to build against upstream; multi-arch (`TARGETARCH`) builds are supported.
 
 Three task types, all run by the same worker mechanism: `bootstrap` (direct solve attempt at project start), `reason` (read full graph, decide complete / new intents / no-op), `explore` (claim one intent, execute, report one fact).
 
@@ -89,7 +89,7 @@ uv run --project cairn cairn dispatch --config dispatch.yaml --startup-healthche
 ./cairn.sh start|stop|restart|status|logs
 ```
 
-Deployment: `docker compose up --build` starts `cairn-server` (port 8000, data persisted to `./datas/cairn/`) and `cairn-dispatcher` (mounts the host Docker socket and `./dispatch.yaml`, waits for the server healthcheck). The worker image must be pulled separately: `docker pull --platform=linux/amd64 ghcr.io/oritera/cairn-worker-container:latest`. The worker image itself is built from `container/` (`docker build . -t cairn-worker-container`).
+Deployment: `docker compose up --build` starts `cairn-server` (port 8000, data persisted to `./datas/cairn/`) and `cairn-dispatcher` (mounts the host Docker socket and `./dispatch.yaml`, waits for the server healthcheck). The app image's base defaults to the NJU GHCR mirror (override with `--build-arg UV_BASE=...`). The worker image must be pulled separately (NJU mirror + retag to the canonical name): `docker pull --platform=linux/amd64 ghcr.nju.edu.cn/oritera/cairn-worker-container:latest && docker tag ghcr.nju.edu.cn/oritera/cairn-worker-container:latest ghcr.io/oritera/cairn-worker-container:latest`. The worker image itself is built from `container/` (`docker build . -t cairn-worker-container`).
 
 ## Architecture rules you must not break
 

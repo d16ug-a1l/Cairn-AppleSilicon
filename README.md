@@ -141,10 +141,11 @@ Worker 也可以不跑在容器里，而是直接运行在 Dispatcher 所在的�
 
 ### 拉取所需镜像
  
-两种部署方式都需要 Worker 容器镜像：
+两种部署方式都需要 Worker 容器镜像。通过南京大学 GHCR 镜像站拉取（国内加速），并重新标记为配置中使用的规范名称：
  
 ```bash
-docker pull --platform=linux/amd64 ghcr.io/oritera/cairn-worker-container:latest
+docker pull --platform=linux/amd64 ghcr.nju.edu.cn/oritera/cairn-worker-container:latest
+docker tag ghcr.nju.edu.cn/oritera/cairn-worker-container:latest ghcr.io/oritera/cairn-worker-container:latest
 ```
 
 创建本地 Dispatcher 配置，填入你的 LLM 端点和 API key：
@@ -155,10 +156,10 @@ cp dispatch.example.yaml dispatch.yaml
  
 ### Docker Compose（推荐）
  
-拉取构建 Cairn 所需的基础镜像：
+拉取构建 Cairn 所需的基础镜像（根 `Dockerfile` 默认已使用南京大学 GHCR 镜像站，此步仅为预热）：
  
 ```bash
-docker pull ghcr.io/astral-sh/uv:python3.13-trixie
+docker pull ghcr.nju.edu.cn/astral-sh/uv:python3.13-trixie
 ```
  
 ```bash

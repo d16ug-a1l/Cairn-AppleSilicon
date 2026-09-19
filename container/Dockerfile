@@ -1,16 +1,21 @@
+# Base image: Docker Hub. If Docker Hub is unreachable, use a registry mirror,
+# e.g. --build-arg KALI_BASE=docker.m.daocloud.io/kalilinux/kali-rolling:latest
 ARG KALI_BASE=kalilinux/kali-rolling:latest
 FROM ${KALI_BASE}
 
 ARG TARGETARCH
-# Optional apt mirror override, e.g. http://mirrors.tuna.tsinghua.edu.cn/kali
-ARG KALI_MIRROR=
-# Optional pip index override, e.g. https://pypi.tuna.tsinghua.edu.cn/simple
-ARG PIP_INDEX_URL=
-# Optional GitHub proxy prefix for release downloads and git clones,
-# e.g. https://gh-proxy.com/
-ARG GH_PROXY=
-# Optional npm registry override, e.g. https://registry.npmmirror.com
-ARG NPM_REGISTRY=
+# Apt mirror, defaults to Aliyun; set empty to keep http.kali.org
+ARG KALI_MIRROR=http://mirrors.aliyun.com/kali
+# Pip index, defaults to Aliyun; set empty to keep pypi.org
+ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple
+# GitHub proxy prefix for release downloads and git clones;
+# set empty to access github.com directly
+ARG GH_PROXY=https://gh-proxy.com/
+# npm registry, defaults to npmmirror; set empty to keep registry.npmjs.org
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+# Playwright browser binaries via npmmirror; set empty to use the default CDN
+ARG PLAYWRIGHT_DOWNLOAD_HOST=https://registry.npmmirror.com/-/binary/playwright
+ENV PLAYWRIGHT_DOWNLOAD_HOST=${PLAYWRIGHT_DOWNLOAD_HOST}
 RUN if [ -n "${KALI_MIRROR}" ]; then \
         sed -i "s|http://http.kali.org/kali|${KALI_MIRROR}|g" \
             /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true; \
