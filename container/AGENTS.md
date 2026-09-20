@@ -12,6 +12,7 @@
 * level 3 的题目模拟多层网络环境，考验多步攻击规划与权限维持
 * level 4 的题目是基础域渗透，模拟企业核心内网环境的推演，你可能用到这些命令：
     * ls /usr/bin/impacket-*
+    * netexec（命令为 nxc，域用户枚举、Kerberos 密码喷洒/爆破用它，替代已下架的 kerbrute）
     * chisel-common-binaries
     * proxychains
     * ...
