@@ -4,14 +4,16 @@ Guidance for AI coding agents working in this repository.
 
 ## Project overview
 
+This repository is **Cairn-AppleSilicon**, a fork of [oritera/Cairn](https://github.com/oritera/Cairn) adapted for **macOS on Apple Silicon (M-series)**: Docker is provided by [OrbStack](https://orbstack.dev/), the worker image is built locally for arm64, and the web UI is localized to Simplified Chinese. For anything not specific to this fork, the upstream project and its docs apply.
+
 Cairn is a general-purpose problem-solving engine (validated on AI penetration testing / CTF). It models goal-directed exploration as a directed fact-intent graph on a blackboard: **Facts** (confirmed findings, nodes), **Intents** (declared explorations, edges), and **Hints** (external human/agent input, outside the graph). Agents coordinate only through the shared graph (stigmergy); each runs an OODA loop.
 
 The repo has two deliverables:
 
 - **`cairn/`** — the Python application (package `cairn`, version 0.2.1), containing:
-  - **Cairn Server** (`src/cairn/server/`) — FastAPI + SQLite truth source. Maintains graph consistency only; does no reasoning. Serves the protocol API and a static web UI (Cytoscape-based graph view in `server/static/`).
+  - **Cairn Server** (`src/cairn/server/`) — FastAPI + SQLite truth source. Maintains graph consistency only; does no reasoning. Serves the protocol API and a static web UI (Cytoscape-based graph view in `server/static/`, UI text in Simplified Chinese in this fork).
   - **Cairn Dispatcher** (`src/cairn/dispatcher/`) — client executor: reads the graph, schedules tasks, manages per-project worker containers (or local processes), and is the **sole protocol writer**. Agents never call the Cairn API directly.
-- **`container/`** — the worker container image (Kali Linux + pentest tooling + pinned `claude` / `codex` / `pi` agent CLIs + Playwright), built separately and published as `ghcr.io/oritera/cairn-worker-container:latest`. The Dockerfile's mirror/proxy build args (`KALI_MIRROR`, `PIP_INDEX_URL`, `GH_PROXY`, `NPM_REGISTRY`, `PLAYWRIGHT_DOWNLOAD_HOST`) default to China mirrors (Aliyun, npmmirror, gh-proxy.com) — pass empty values to build against upstream; multi-arch (`TARGETARCH`) builds are supported.
+- **`container/`** — the worker container image (Kali Linux + pentest tooling + pinned `claude` / `codex` / `pi` agent CLIs + headless Chromium), tagged locally as `ghcr.io/oritera/cairn-worker-container:latest`. The Dockerfile's mirror/proxy build args (`KALI_BASE`, `KALI_MIRROR`, `PIP_INDEX_URL`, `GH_PROXY`, `NPM_REGISTRY`) default to China mirrors (daocloud, Aliyun, npmmirror, gh-proxy.com) — pass empty values to build against upstream; multi-arch (`TARGETARCH`) builds are supported by the Dockerfile, but this fork only builds arm64 (the upstream GHCR publish is amd64-only).
 
 Three task types, all run by the same worker mechanism: `bootstrap` (direct solve attempt at project start), `reason` (read full graph, decide complete / new intents / no-op), `explore` (claim one intent, execute, report one fact).
 
@@ -22,7 +24,8 @@ Three task types, all run by the same worker mechanism: `bootstrap` (direct solv
 - Storage: plain SQLite (`server/db.py`), WAL mode, schema created idempotently on startup; default DB at `~/.local/share/cairn/cairn.db` (override with `cairn serve --db-path`).
 - No linter/formatter config (no ruff/black/mypy); no CI config — just keep code consistent with existing style.
 - PyPI index is pinned to the Aliyun mirror in `cairn/pyproject.toml` and the root `Dockerfile`.
-- License: GNU AGPLv3 for personal/educational use, with a separate commercial license (dual licensing); contributions are accepted under both.
+- Docker on macOS is provided by OrbStack (a prerequisite for container execution mode; local execution mode does not need it).
+- License: GNU AGPLv3 for personal/educational use, with a separate commercial license available from the upstream author (dual licensing); contributions are accepted under both.
 
 ## Repository layout
 
@@ -36,7 +39,7 @@ cairn/                        # Python project (pyproject.toml, uv.lock)
       models.py               # pydantic protocol models (Project/Fact/Intent/Hint/Settings)
       services.py             # business logic behind the routers
       routers/                # settings, projects, hints, intents, export
-      static/                 # web UI (index.html + vendored JS: cytoscape, alpine, tailwind)
+      static/                 # web UI (index.html, zh-CN + vendored JS in vendor/)
     dispatcher/
       config.py               # dispatch.yaml schema, strict validation, prompt token checks,
                               # MOCK_* behavior distributions
@@ -58,6 +61,7 @@ container/                    # worker image: Dockerfile (Kali + tools + agent C
 docs/specs/                   # authoritative design docs (Chinese):
                               #   server-protocol.md   — the Cairn collaboration protocol
                               #   dispatcher-design.md — dispatcher behavior, task model, config
+docs/development-guide.md     # development guide (Chinese)
 dispatch.example.yaml         # container-mode config template
 dispatch.local.example.yaml   # local-mode config template (no Docker)
 dispatch_mock.yaml            # mock-driver config for offline end-to-end runs
@@ -66,9 +70,9 @@ cairn.sh                      # host helper: start/stop/restart/status/logs for 
                               # dispatcher (auto-starts OrbStack/Docker on macOS, logs and
                               # pids in .run/, cleans up leftover worker containers on stop)
 build.sh                      # one-shot project setup: env checks (brew-installs missing
-                              # git/uv/OrbStack, auto-starts OrbStack), uv sync, worker
-                              # image pull via NJU mirror + retag, dispatch.yaml init
-                              # from example, pytest verification
+                              # git/uv/OrbStack, auto-starts OrbStack), uv sync, local
+                              # arm64 worker image build, dispatch.yaml init from example,
+                              # pytest verification
 ```
 
 ## Build, run, and test commands
@@ -92,11 +96,21 @@ uv run --project cairn cairn dispatch --config dispatch.yaml --startup-healthche
 # Host convenience script (macOS/Linux): manage server + dispatcher together
 ./cairn.sh start|stop|restart|status|logs
 
-# One-shot project setup (deps, worker image, config init, tests)
-./build.sh
+# One-shot project setup (deps, arm64 worker image, config init, tests)
+./build.sh                # add --force-build to rebuild the worker image
 ```
 
-Deployment: `docker compose up --build` starts `cairn-server` (port 8000, data persisted to `./datas/cairn/`) and `cairn-dispatcher` (mounts the host Docker socket and `./dispatch.yaml`, waits for the server healthcheck). The app image's base defaults to the NJU GHCR mirror (override with `--build-arg UV_BASE=...`). The worker image must be pulled separately (NJU mirror + retag to the canonical name): `docker pull --platform=linux/amd64 ghcr.nju.edu.cn/oritera/cairn-worker-container:latest && docker tag ghcr.nju.edu.cn/oritera/cairn-worker-container:latest ghcr.io/oritera/cairn-worker-container:latest`. The worker image itself is built from `container/` (`docker build . -t cairn-worker-container`).
+Worker image: this fork builds it locally for arm64 only (~20GB, slow first build), using the daocloud mirror for the Kali base:
+
+```bash
+docker build --platform=linux/arm64 \
+  --build-arg KALI_BASE=docker.m.daocloud.io/kalilinux/kali-rolling:latest \
+  -t ghcr.io/oritera/cairn-worker-container:latest container/
+```
+
+`build.sh` performs exactly this and skips the build if an arm64 image already exists. Do not pull the upstream GHCR image on this fork — it is amd64-only.
+
+Deployment (upstream path, still functional): `docker compose up --build` starts `cairn-server` (port 8000, data persisted to `./datas/cairn/`) and `cairn-dispatcher` (mounts the host Docker socket and `./dispatch.yaml`, waits for the server healthcheck). The app image's base defaults to the NJU GHCR mirror (override with `--build-arg UV_BASE=...`).
 
 ## Architecture rules you must not break
 
@@ -126,12 +140,12 @@ Runtime config is a single `dispatch.yaml` (see `dispatch.example.yaml`). `confi
 
 - Framework: pytest, configured in `cairn/pyproject.toml` (`testpaths = ["tests"]`), run from repo root with the command above. Verified: 98 tests passing (~4s), fully offline.
 - `tests/conftest.py` provides fakes (`FakeClient`, `FakeDriver`, `FakeContainerManager`, `FakeLease`) and config/project factories.
-- The `mock` worker driver plus `prompt_group: mock` enable end-to-end dispatcher tests without LLMs (`test_mock_end_to_end.py`, driven by `dispatch_mock.yaml`-style configs); `test_server_api.py` exercises the FastAPI app via httpx; other `test_*.py` files cover config/adapters, contracts/drivers, DB migrations, healthchecks, local execution, protocol/startup, runtime logic, scheduler logic, and worker tasks.
+- The `mock` worker driver plus `prompt_group: mock` enable end-to-end dispatcher tests without LLMs (`test_mock_end_to_end.py`, driven by `dispatch_mock.yaml`-style configs); `test_server_api.py` exercises the FastAPI app via httpx; other `test_*.py` files cover config/adapters, contracts/drivers, DB migrations, healthchecks, local execution, protocol/startup, runtime logic, scheduler logic, container archives, and worker tasks.
 - When adding behavior, add tests in the matching existing `test_*.py` file and reuse the conftest fakes.
 
 ## Code style guidelines
 
-- English for all Python source, comments, and prompts. README.md, the design specs under `docs/specs/`, the development guide under `docs/`, the worker-environment briefing in `container/AGENTS.md`, and the user-facing output of `cairn.sh` are in Chinese — keep them in Chinese when editing.
+- English for all Python source, comments, prompts, and the config examples. README.md, the design specs under `docs/specs/`, the development guide under `docs/`, the worker-environment briefing in `container/AGENTS.md`, and the user-facing output of `cairn.sh` and `build.sh` are in Chinese — keep them in Chinese when editing. The web UI (`server/static/index.html`) is localized to Simplified Chinese in this fork — keep UI text in Chinese.
 - `from __future__ import annotations` at the top of modules; pydantic models for config and protocol data; stdlib `logging` with lazy `%s` args; type hints throughout.
 - Minimal comments; the few that exist explain non-obvious design decisions (e.g. intentional couplings) — preserve that convention.
 - No formatter/linter is configured; match surrounding code (4-space indent, double-quoted strings).

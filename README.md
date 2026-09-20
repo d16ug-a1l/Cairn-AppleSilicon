@@ -144,18 +144,21 @@ Worker 也可以不跑在容器里，而是直接运行在 Dispatcher 所在的�
 ./build.sh
 ```
 
-自动完成：环境检查（缺失的 git / uv / OrbStack 自动通过 Homebrew 安装，并自动拉起 OrbStack）→ 安装 Python 依赖（PyPI 走阿里云镜像）→ 通过国内镜像站拉取 worker 镜像 → 从 `dispatch.example.yaml` 创建 `dispatch.yaml` → 运行测试验证。构建完成后编辑 `dispatch.yaml` 填入 LLM 端点和 API key，然后 `./cairn.sh start` 即可启动。
+自动完成：环境检查（缺失的 git / uv / OrbStack 自动通过 Homebrew 安装，并自动拉起 OrbStack）→ 安装 Python 依赖（PyPI 走阿里云镜像）→ 本地构建 arm64 worker 镜像（Kali 基础镜像走国内镜像站）→ 从 `dispatch.example.yaml` 创建 `dispatch.yaml` → 运行测试验证。构建完成后编辑 `dispatch.yaml` 填入 LLM 端点和 API key，然后 `./cairn.sh start` 即可启动。
 
 以下为手动分步方式：
 
-### 拉取所需镜像
+### 构建 worker 镜像
  
-两种部署方式都需要 Worker 容器镜像。通过南京大学 GHCR 镜像站拉取（国内加速），并重新标记为配置中使用的规范名称：
+两种部署方式都需要 Worker 容器镜像。本项目仅构建 **arm64** 版本（上游 GHCR 预构建镜像仅有 amd64，故改为本地构建；Kali 基础镜像通过国内镜像站获取）：
  
 ```bash
-docker pull --platform=linux/amd64 ghcr.nju.edu.cn/oritera/cairn-worker-container:latest
-docker tag ghcr.nju.edu.cn/oritera/cairn-worker-container:latest ghcr.io/oritera/cairn-worker-container:latest
+docker build --platform=linux/arm64 \
+  --build-arg KALI_BASE=docker.m.daocloud.io/kalilinux/kali-rolling:latest \
+  -t ghcr.io/oritera/cairn-worker-container:latest ./container
 ```
+
+镜像 tag 保持配置中使用的规范名称，`dispatch.yaml` 和 `cairn.sh` 无需改动。首次构建需下载数 GB 依赖，耗时较长。
 
 创建本地 Dispatcher 配置，填入你的 LLM 端点和 API key：
 

@@ -5,13 +5,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
-MIRROR_IMAGE="ghcr.nju.edu.cn/oritera/cairn-worker-container:latest"
 IMAGE="ghcr.io/oritera/cairn-worker-container:latest"
-PLATFORM="linux/amd64"
+KALI_BASE="docker.m.daocloud.io/kalilinux/kali-rolling:latest"
 CONFIG="$ROOT/dispatch.yaml"
-FORCE_PULL=0
+FORCE_BUILD=0
 
-[ "${1:-}" = "--force-pull" ] && FORCE_PULL=1
+[ "${1:-}" = "--force-build" ] && FORCE_BUILD=1
 
 step() { echo; echo "── $1 ──"; }
 
@@ -60,15 +59,20 @@ step "2/5 安装 Python 依赖"
 uv sync --project cairn --group dev --frozen
 echo "[+] 依赖安装完成"
 
-# 3. 准备 worker 镜像（南京大学 GHCR 镜像站拉取，retag 为规范名称）
-step "3/5 准备 worker 镜像"
-if [ "$FORCE_PULL" -eq 0 ] && docker image inspect "$IMAGE" >/dev/null 2>&1; then
-  echo "[=] 镜像 $IMAGE 已存在，跳过（--force-pull 可强制更新）"
+# 3. 构建 worker 镜像（本项目仅构建 arm64；上游 GHCR 预构建镜像仅有 amd64，故本地构建）
+step "3/5 构建 worker 镜像（arm64）"
+EXISTING_ARCH="$(docker image inspect "$IMAGE" --format '{{.Architecture}}' 2>/dev/null || true)"
+if [ "$FORCE_BUILD" -eq 0 ] && [ "$EXISTING_ARCH" = "arm64" ]; then
+  echo "[=] arm64 镜像 $IMAGE 已存在，跳过（--force-build 可强制重建）"
 else
-  echo "[*] 通过国内镜像站拉取 worker 镜像（约数 GB，请耐心等待）..."
-  docker pull --platform="$PLATFORM" "$MIRROR_IMAGE"
-  docker tag "$MIRROR_IMAGE" "$IMAGE"
-  echo "[+] 镜像已就绪并标记为 $IMAGE"
+  if [ -n "$EXISTING_ARCH" ] && [ "$EXISTING_ARCH" != "arm64" ]; then
+    echo "[*] 本地镜像为 $EXISTING_ARCH，将重新构建 arm64 版本"
+  fi
+  echo "[*] 本地构建 arm64 worker 镜像（体积约 20GB，首次构建耗时较长，请耐心等待）..."
+  docker build --platform=linux/arm64 \
+    --build-arg KALI_BASE="$KALI_BASE" \
+    -t "$IMAGE" "$ROOT/container"
+  echo "[+] arm64 镜像已就绪: $IMAGE"
 fi
 
 # 4. 初始化配置文件

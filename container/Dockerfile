@@ -13,9 +13,6 @@ ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple
 ARG GH_PROXY=https://gh-proxy.com/
 # npm registry, defaults to npmmirror; set empty to keep registry.npmjs.org
 ARG NPM_REGISTRY=https://registry.npmmirror.com
-# Playwright browser binaries via npmmirror; set empty to use the default CDN
-ARG PLAYWRIGHT_DOWNLOAD_HOST=https://registry.npmmirror.com/-/binary/playwright
-ENV PLAYWRIGHT_DOWNLOAD_HOST=${PLAYWRIGHT_DOWNLOAD_HOST}
 RUN if [ -n "${KALI_MIRROR}" ]; then \
         sed -i "s|http://http.kali.org/kali|${KALI_MIRROR}|g" \
             /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true; \
@@ -43,7 +40,7 @@ USER kali
 RUN sudo apt update && \
     sudo apt install -y bsdextrautils npm jq iputils-ping sshpass ncat rlwrap \
     bloodyad coercer enum4linux-ng pwncat chisel-common-binaries \
-    dirsearch yq krb5-user gitleaks naabu nikto netexec adb && \
+    dirsearch yq krb5-user gitleaks naabu nikto netexec adb chromium && \
     if [ "$TARGETARCH" != "amd64" ]; then \
         sudo apt install -y cmake build-essential python3-dev python3-pwntools python3-pymongo; \
     fi && \
@@ -54,22 +51,20 @@ RUN sudo apt update && \
     fi && \
     if [ -n "${NPM_REGISTRY}" ]; then \
         sudo npm config set registry "${NPM_REGISTRY}" --global; \
-    fi && \
-    sudo npm install -g @playwright/cli@latest && \
-    cd /tmp && \
-    if [ "$TARGETARCH" = "amd64" ]; then \
-        playwright-cli install; \
-    else \
-        playwright-cli install || \
-        echo "WARNING: playwright browser install failed on ${TARGETARCH}; run 'playwright-cli install' at runtime if needed"; \
     fi
 
-RUN cd /tmp && \
+# git_clone retries because gh-proxy intermittently 403s under rapid sequential clones
+RUN git_clone() { url="$1"; dir="${2:-$(basename "$1" .git)}"; \
+        for _ in 1 2 3 4 5; do \
+            rm -rf "$dir"; git clone --depth=1 "$url" "$dir" && return 0; sleep 10; \
+        done; return 1; \
+    } && \
+    cd /tmp && \
     wget -q "${GH_PROXY}https://github.com/projectdiscovery/katana/releases/download/v1.5.0/katana_1.5.0_linux_${TARGETARCH}.zip" -O katana.zip && \
     wget -q "${GH_PROXY}https://github.com/projectdiscovery/nuclei/releases/download/v3.7.1/nuclei_3.7.1_linux_${TARGETARCH}.zip" -O nuclei.zip && \
     wget -q "${GH_PROXY}https://github.com/hahwul/dalfox/releases/download/v2.12.0/dalfox-linux-${TARGETARCH}.tar.gz" -O dalfox.tar.gz && \
     wget -q "${GH_PROXY}https://github.com/BishopFox/cloudfox/releases/download/v2.0.1/cloudfox-linux-${TARGETARCH}.zip" -O cloudfox.zip && \
-    git clone --depth 1 "https://github.com/projectdiscovery/nuclei-templates.git" /home/kali/.local/nuclei-templates && \
+    git_clone "https://github.com/projectdiscovery/nuclei-templates.git" /home/kali/.local/nuclei-templates && \
     unzip -q katana.zip katana && sudo mv katana /usr/local/bin/ && \
     unzip -q nuclei.zip nuclei && sudo mv nuclei /usr/local/bin/ && \
     tar -xzf dalfox.tar.gz && sudo mv dalfox-linux-${TARGETARCH} /usr/local/bin/dalfox && \
@@ -77,24 +72,39 @@ RUN cd /tmp && \
     if [ -z "${GH_PROXY}" ]; then nuclei -ut; fi && \
     sudo rm -rf /tmp/*
 
-RUN mkdir -p /home/kali/knowledges && cd /home/kali/knowledges && \
-    git clone --depth=1 https://github.com/swisskyrepo/PayloadsAllTheThings.git && \
-    git clone --depth=1 https://github.com/swisskyrepo/InternalAllTheThings.git && \
-    git clone --depth=1 https://github.com/HackTricks-wiki/hacktricks.git && \
-    git clone --depth=1 https://github.com/HackTricks-wiki/hacktricks-cloud.git
+RUN git_clone() { url="$1"; dir="$(basename "$1" .git)"; \
+        for _ in 1 2 3 4 5; do \
+            rm -rf "$dir"; git clone --depth=1 "$url" && return 0; sleep 10; \
+        done; return 1; \
+    } && \
+    mkdir -p /home/kali/knowledges && cd /home/kali/knowledges && \
+    git_clone https://github.com/swisskyrepo/PayloadsAllTheThings.git && \
+    git_clone https://github.com/swisskyrepo/InternalAllTheThings.git && \
+    git_clone https://github.com/HackTricks-wiki/hacktricks.git && \
+    git_clone https://github.com/HackTricks-wiki/hacktricks-cloud.git
 
-RUN mkdir -p /home/kali/tools && cd /home/kali/tools && \
+RUN git_clone() { url="$1"; dir="$(basename "$1" .git)"; \
+        for _ in 1 2 3 4 5; do \
+            rm -rf "$dir"; git clone --depth=1 "$url" && return 0; sleep 10; \
+        done; return 1; \
+    } && \
+    mkdir -p /home/kali/tools && cd /home/kali/tools && \
     wget -q "${GH_PROXY}https://github.com/frohoff/ysoserial/releases/download/v0.0.6/ysoserial-all.jar" -O ysoserial.jar && \
-    git clone --depth=1 https://github.com/ticarpi/jwt_tool.git && \
+    git_clone https://github.com/ticarpi/jwt_tool.git && \
     cd jwt_tool && pip3 install -r requirements.txt --break-system-packages && \
-    git clone --depth=1 https://github.com/IOActive/jdwp-shellifier.git
+    git_clone https://github.com/IOActive/jdwp-shellifier.git
 
-RUN mkdir -p /home/kali/pocs && cd /home/kali/pocs && \
-    git clone --depth=1 https://github.com/iSee857/CVE-PoC.git && \
-    git clone --depth=1 https://github.com/zhzyker/exphub.git && \
-    git clone --depth=1 https://github.com/passwa11/2023Hvv_.git && \
-    git clone --depth=1 https://github.com/Threekiii/Awesome-POC.git && \
-    git clone --depth=1 https://github.com/vulhub/vulhub.git
+RUN git_clone() { url="$1"; dir="$(basename "$1" .git)"; \
+        for _ in 1 2 3 4 5; do \
+            rm -rf "$dir"; git clone --depth=1 "$url" && return 0; sleep 10; \
+        done; return 1; \
+    } && \
+    mkdir -p /home/kali/pocs && cd /home/kali/pocs && \
+    git_clone https://github.com/iSee857/CVE-PoC.git && \
+    git_clone https://github.com/zhzyker/exphub.git && \
+    git_clone https://github.com/passwa11/2023Hvv_.git && \
+    git_clone https://github.com/Threekiii/Awesome-POC.git && \
+    git_clone https://github.com/vulhub/vulhub.git
 
 RUN cd /tmp && \
     wget -q "${GH_PROXY}https://github.com/sharkdp/fd/releases/download/v10.4.2/fd_10.4.2_${TARGETARCH}.deb" -O fd.deb && \
@@ -128,7 +138,6 @@ RUN sudo rm -rf /usr/lib/llvm-*/build && \
 RUN printf '%s\n' 'PS1="${PS1%\\n*} \[\033[0;36m\]\D{%y-%m-%d} - \t\[\033[;32m\]\n${PS1##*\\n}"' >> /home/kali/.bashrc && \
     mkdir -p /home/kali/workspace && cd /home/kali/workspace && git init
 ENV TZ=Asia/Shanghai
-ENV PLAYWRIGHT_MCP_BROWSER=chromium
 ENV CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 ENV PYTHONUNBUFFERED=1
 
