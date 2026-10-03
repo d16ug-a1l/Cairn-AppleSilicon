@@ -28,5 +28,13 @@ def format_hints(hints: list[dict[str, Any]]) -> str:
     return format_json_block(hints)
 
 
+def format_attachments(attachments: list[dict[str, Any]]) -> str:
+    entries = [
+        {"filename": attachment.get("filename", ""), "size": attachment.get("size", 0)}
+        for attachment in attachments
+    ]
+    return format_json_block(entries)
+
+
 def format_json_block(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2)

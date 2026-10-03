@@ -49,6 +49,10 @@ def _load_project_data(conn, project_id: str):
 
 def _export_yaml(conn, project_id: str) -> str:
     proj, facts, hints, intents, sources_by_intent = _load_project_data(conn, project_id)
+    attachments = conn.execute(
+        "SELECT filename, size FROM attachments WHERE project_id = ? ORDER BY created_at",
+        (project_id,),
+    ).fetchall()
 
     origin_desc = ""
     goal_desc = ""
@@ -75,6 +79,12 @@ def _export_yaml(conn, project_id: str) -> str:
                 "created_at": format_export_timestamp(h["created_at"]),
             }
             for h in hints
+        ]
+
+    if attachments:
+        data["attachments"] = [
+            {"filename": a["filename"], "size": a["size"]}
+            for a in attachments
         ]
 
     data["facts"] = [{"id": f["id"], "description": f["description"]} for f in facts]

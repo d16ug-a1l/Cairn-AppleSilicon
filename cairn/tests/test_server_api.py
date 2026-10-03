@@ -207,3 +207,78 @@ def test_project_creation_rejects_invalid_bootstrap_enabled(client: TestClient) 
     )
 
     assert response.status_code == 422
+
+
+def test_attachment_upload_list_download_delete_roundtrip(client: TestClient) -> None:
+    project_id = _create_project(client)
+    payload = b"\x00zip-ish bytes\xff\n" * 1000
+
+    response = client.post(
+        f"/projects/{project_id}/attachments",
+        params={"filename": "challenge.zip"},
+        content=payload,
+    )
+    assert response.status_code == 201
+    attachment = response.json()
+    assert attachment["id"] == "a001"
+    assert attachment["filename"] == "challenge.zip"
+    assert attachment["size"] == len(payload)
+
+    # directory components are stripped from the supplied filename
+    response = client.post(
+        f"/projects/{project_id}/attachments",
+        params={"filename": "../nested/traffic.pcap"},
+        content=b"pcap-bytes",
+    )
+    assert response.status_code == 201
+    assert response.json()["filename"] == "traffic.pcap"
+
+    listing = client.get(f"/projects/{project_id}/attachments")
+    assert [a["id"] for a in listing.json()] == ["a001", "a002"]
+
+    download = client.get(f"/projects/{project_id}/attachments/a001")
+    assert download.status_code == 200
+    assert download.content == payload
+
+    assert client.delete(f"/projects/{project_id}/attachments/a001").status_code == 204
+    assert client.get(f"/projects/{project_id}/attachments/a001").status_code == 404
+    assert [a["id"] for a in client.get(f"/projects/{project_id}/attachments").json()] == ["a002"]
+
+
+def test_attachment_upload_to_missing_project_is_404(client: TestClient) -> None:
+    response = client.post(
+        "/projects/proj_404/attachments",
+        params={"filename": "a.zip"},
+        content=b"x",
+    )
+    assert response.status_code == 404
+    assert client.get("/projects/proj_404/attachments").status_code == 404
+
+
+def test_deleting_project_removes_attachment_files(client: TestClient) -> None:
+    project_id = _create_project(client)
+    client.post(
+        f"/projects/{project_id}/attachments",
+        params={"filename": "a.bin"},
+        content=b"data",
+    )
+    attachment_dir = db.attachments_root() / project_id
+    assert attachment_dir.is_dir()
+
+    assert client.delete(f"/projects/{project_id}").status_code == 204
+    assert not attachment_dir.exists()
+
+
+def test_project_summary_and_export_include_attachments(client: TestClient) -> None:
+    project_id = _create_project(client)
+    client.post(
+        f"/projects/{project_id}/attachments",
+        params={"filename": "a.bin"},
+        content=b"data",
+    )
+
+    summary = client.get("/projects").json()[0]
+    assert summary["attachment_count"] == 1
+
+    exported = client.get(f"/projects/{project_id}/export?format=yaml").text
+    assert "filename: a.bin" in exported

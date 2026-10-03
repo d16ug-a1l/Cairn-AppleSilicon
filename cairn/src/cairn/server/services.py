@@ -48,6 +48,10 @@ def next_hint_id(conn: sqlite3.Connection, project_id: str) -> str:
     return _next_scoped_id(conn, "hint", "h", project_id)
 
 
+def next_attachment_id(conn: sqlite3.Connection, project_id: str) -> str:
+    return _next_scoped_id(conn, "attachment", "a", project_id)
+
+
 def get_project_or_404(conn: sqlite3.Connection, project_id: str) -> sqlite3.Row:
     row = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
     if row is None:

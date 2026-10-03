@@ -100,12 +100,16 @@ class FakeLease:
 @dataclass
 class FakeContainerManager:
     writes: list[tuple[str, str, str]] = field(default_factory=list)
+    binary_writes: list[tuple[str, str, bytes]] = field(default_factory=list)
 
     def ensure_running(self, project_id: str) -> str:
         return f"container-{project_id}"
 
     def write_text_file(self, container_name: str, path: str, content: str) -> None:
         self.writes.append((container_name, path, content))
+
+    def write_binary_file(self, container_name: str, path: str, content: bytes) -> None:
+        self.binary_writes.append((container_name, path, content))
 
 
 @dataclass
@@ -116,9 +120,19 @@ class FakeClient:
     created_intents: list[tuple[str, list[str], str, str]] = field(default_factory=list)
     released: list[tuple[str, str, str]] = field(default_factory=list)
     released_reasons: list[tuple[str, str]] = field(default_factory=list)
+    attachments: list[dict] = field(default_factory=list)
+    attachment_blobs: dict[str, bytes] = field(default_factory=dict)
+    downloaded_attachments: list[tuple[str, str]] = field(default_factory=list)
 
     def get_project(self, _project_id: str) -> ProjectDetail:
         return self.project
+
+    def list_attachments(self, _project_id: str) -> list[dict]:
+        return list(self.attachments)
+
+    def download_attachment(self, project_id: str, attachment_id: str) -> bytes:
+        self.downloaded_attachments.append((project_id, attachment_id))
+        return self.attachment_blobs[attachment_id]
 
     def conclude(self, project_id: str, intent_id: str, worker: str, description: str) -> ApiResult:
         self.concluded.append((project_id, intent_id, worker, description))

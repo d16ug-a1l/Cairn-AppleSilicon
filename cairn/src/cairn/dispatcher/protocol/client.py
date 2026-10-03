@@ -72,6 +72,22 @@ class CairnClient:
         response.raise_for_status()
         return response.text
 
+    def list_attachments(self, project_id: str) -> list[dict[str, Any]]:
+        response = self._session().get(
+            self._url(f"/projects/{project_id}/attachments"),
+            timeout=self._timeout,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def download_attachment(self, project_id: str, attachment_id: str) -> bytes:
+        response = self._session().get(
+            self._url(f"/projects/{project_id}/attachments/{attachment_id}"),
+            timeout=self._timeout,
+        )
+        response.raise_for_status()
+        return response.content
+
     def heartbeat(self, project_id: str, intent_id: str, worker: str) -> ApiResult:
         return self._request_json(
             "POST",

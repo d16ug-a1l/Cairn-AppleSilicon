@@ -350,6 +350,12 @@
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 1 1 7.072 0l-.548.547A3.374 3.374 0 0 0 14 18.469V19a2 2 0 1 1-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547Z"/></svg>
               <span x-text="p.hint_count"></span>
             </span>
+            <template x-if="p.attachment_count > 0">
+              <span class="flex items-center gap-1">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                <span x-text="p.attachment_count"></span>
+              </span>
+            </template>
           </div>
           <div class="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-400">
             <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24"><path d="M8 2v3M16 2v3"/><path d="M3.5 9.5h17"/><rect x="3.5" y="4.5" width="17" height="16" rx="2.5"/><path d="M8 13h3M8 16h6"/></svg>
@@ -582,6 +588,10 @@
           :class="sideTab === 'hints' ? 'text-brand-600 border-b-2 border-brand-500' : 'text-slate-400 hover:text-slate-600'">
           提示 <span class="ml-0.5 text-[10px] opacity-60" x-text="project.hints.length"></span>
         </button>
+        <button @click="sideTab = 'attachments'" class="flex-1 px-3 py-2.5 text-xs font-medium transition"
+          :class="sideTab === 'attachments' ? 'text-brand-600 border-b-2 border-brand-500' : 'text-slate-400 hover:text-slate-600'">
+          附件 <span class="ml-0.5 text-[10px] opacity-60" x-text="attachments.length"></span>
+        </button>
         <button @click="sideTab = 'log'" class="flex-1 px-3 py-2.5 text-xs font-medium transition"
           :class="sideTab === 'log' ? 'text-brand-600 border-b-2 border-brand-500' : 'text-slate-400 hover:text-slate-600'">日志</button>
       </div>
@@ -732,6 +742,34 @@
         </template>
       </div>
 
+      <!-- Attachments -->
+      <div x-show="sideTab === 'attachments'" class="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/40">
+        <template x-if="projectIsActive()">
+          <label class="flex items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-white/80 px-4 py-3 text-sm text-slate-500 cursor-pointer hover:border-brand-300 hover:text-brand-600 transition">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+            上传附件
+            <input type="file" multiple class="hidden" @change="uploadProjectAttachments($event)">
+          </label>
+        </template>
+        <template x-if="attachments.length === 0">
+          <div class="rounded-2xl border border-dashed border-slate-200 bg-white/80 px-5 py-10 text-center shadow-sm">
+            <p class="text-sm text-slate-300">还没有附件</p>
+          </div>
+        </template>
+        <template x-for="a in attachments" :key="a.id">
+          <div class="rounded-2xl border border-slate-200 bg-white shadow-sm px-4 py-3 flex items-center gap-3">
+            <svg class="w-4 h-4 shrink-0 text-slate-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+            <div class="min-w-0 flex-1">
+              <a :href="`/projects/${project.project.id}/attachments/${a.id}`" :download="a.filename"
+                class="block text-sm text-slate-700 truncate hover:text-brand-600 transition" x-text="a.filename"></a>
+              <p class="text-[11px] text-slate-400 tabular-nums" x-text="`${formatSize(a.size)} · ${formatTime(a.created_at)}`"></p>
+            </div>
+            <button x-show="projectIsActive()" type="button" @click="deleteAttachment(a.id)"
+              class="shrink-0 px-2 text-slate-300 hover:text-red-400 transition text-sm" title="删除附件">&times;</button>
+          </div>
+        </template>
+      </div>
+
       <!-- Log -->
       <div x-show="sideTab === 'log'" class="flex-1 overflow-y-auto p-4 space-y-3">
         <template x-if="selectedTimelineSummary()">
@@ -818,6 +856,24 @@
           </div>
         </template>
         <p class="text-[11px] text-slate-400">提示创建者将使用本地身份：<span class="font-medium text-slate-600" x-text="actorName()"></span></p>
+      </div>
+
+      <div>
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-[11px] text-slate-400 font-medium uppercase tracking-wider">附件（可选）</span>
+          <label class="text-[11px] text-brand-500 hover:text-brand-600 font-medium cursor-pointer">
+            + 添加
+            <input type="file" multiple class="hidden" @change="addNewProjectFiles($event)">
+          </label>
+        </div>
+        <template x-for="(file, idx) in newProject.files" :key="idx">
+          <div class="flex items-center gap-2 mb-2 px-3 py-1.5 border border-slate-200 rounded-lg text-sm">
+            <svg class="w-3.5 h-3.5 shrink-0 text-slate-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+            <span class="flex-1 truncate text-slate-600" x-text="file.name"></span>
+            <span class="text-[11px] text-slate-400 shrink-0 tabular-nums" x-text="formatSize(file.size)"></span>
+            <button type="button" @click="newProject.files.splice(idx, 1)" class="px-2 text-slate-300 hover:text-red-400 transition text-sm">&times;</button>
+          </div>
+        </template>
       </div>
     </div>
     <div class="flex justify-end gap-2 mt-5">
@@ -1101,7 +1157,8 @@ function cairnApp() {
     exportProjectId: '',
     showDeleteModal: false,
 
-    newProject: { title: '', origin: '', goal: '', bootstrap: true, hints: [{ content: '' }] },
+    newProject: { title: '', origin: '', goal: '', bootstrap: true, hints: [{ content: '' }], files: [] },
+    attachments: [],
     intentForm: { description: '' },
     concludeForm: { description: '', intentId: '' },
     completeForm: { description: '' },
@@ -1595,6 +1652,59 @@ function cairnApp() {
 
     async loadProject(id) {
       try { this.project = await this.api('GET', `/projects/${id}`); } catch(e) { this.showToast(e.message, 'error'); }
+      await this.loadAttachments(id);
+    },
+
+    async loadAttachments(projectId) {
+      try { this.attachments = await this.api('GET', `/projects/${projectId}/attachments`); } catch(e) { console.error(e); }
+    },
+
+    addNewProjectFiles(event) {
+      const files = Array.from(event.target.files || []);
+      event.target.value = '';
+      this.newProject.files.push(...files);
+    },
+
+    formatSize(bytes) {
+      if (!bytes && bytes !== 0) return '';
+      if (bytes < 1024) return `${bytes} B`;
+      const units = ['KB', 'MB', 'GB'];
+      let value = bytes / 1024;
+      let unit = 0;
+      while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit += 1; }
+      return `${value.toFixed(1)} ${units[unit]}`;
+    },
+
+    async uploadAttachments(projectId, files) {
+      for (const file of files) {
+        const response = await fetch(`/projects/${projectId}/attachments?filename=${encodeURIComponent(file.name)}`, { method: 'POST', body: file });
+        if (!response.ok) {
+          let message = `附件 ${file.name} 上传失败`;
+          try { const data = await response.json(); if (typeof data.detail === 'string') message = data.detail; } catch {}
+          throw new Error(message);
+        }
+      }
+    },
+
+    async uploadProjectAttachments(event) {
+      const files = Array.from(event.target.files || []);
+      event.target.value = '';
+      if (files.length === 0 || !this.selectedProjectId) return;
+      try {
+        await this.uploadAttachments(this.selectedProjectId, files);
+        await this.loadAttachments(this.selectedProjectId);
+        await this.loadProjects();
+        this.showToast('附件已上传');
+      } catch(e) { this.showToast(e.message, 'error'); }
+    },
+
+    async deleteAttachment(attachmentId) {
+      try {
+        await this.api('DELETE', `/projects/${this.selectedProjectId}/attachments/${attachmentId}`);
+        await this.loadAttachments(this.selectedProjectId);
+        await this.loadProjects();
+        this.showToast('附件已删除');
+      } catch(e) { this.showToast(e.message, 'error'); }
     },
 
     async toggleProjectStop() {
@@ -3281,12 +3391,14 @@ function cairnApp() {
         };
         const hints = hintContents.map(h => ({ content: h.content.trim(), creator: actor }));
         if (hints.length > 0) body.hints = hints;
+        const files = this.newProject.files;
         const data = await this.api('POST', '/projects', body);
         this.showNewProject = false;
-        this.newProject = { title:'', origin:'', goal:'', bootstrap: true, hints: [{ content:'' }] };
+        this.newProject = { title:'', origin:'', goal:'', bootstrap: true, hints: [{ content:'' }], files: [] };
+        if (files.length > 0) await this.uploadAttachments(data.project.id, files);
         await this.loadProjects();
         await this.openProject(data.project.id);
-        this.showToast('项目已创建');
+        this.showToast(files.length > 0 ? '项目已创建，附件已上传' : '项目已创建');
       } catch(e) { this.showToast(e.message, 'error'); }
     },
 

@@ -18,6 +18,7 @@ def _loop() -> DispatcherLoop:
     loop.cleanup_futures = {}
     loop._cleanup_pending = set()
     loop._inactive_cleanup_done = {}
+    loop._synced_attachments = {}
     loop.worker_unhealthy_until = {}
     loop.worker_rejected_until = {}
     loop._log_state = {}
@@ -37,6 +38,7 @@ def _summary(project_id: str, status: str) -> ProjectSummary:
         working_intent_count=0,
         unclaimed_intent_count=0,
         hint_count=0,
+        attachment_count=0,
     )
 
 

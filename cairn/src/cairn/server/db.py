@@ -66,6 +66,15 @@ CREATE TABLE IF NOT EXISTS hints (
     PRIMARY KEY (id, project_id)
 );
 
+CREATE TABLE IF NOT EXISTS attachments (
+    id TEXT NOT NULL,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    filename TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (id, project_id)
+);
+
 CREATE TABLE IF NOT EXISTS counters (
     name TEXT PRIMARY KEY,
     value INTEGER NOT NULL DEFAULT 0
@@ -101,6 +110,12 @@ def _ensure_project_columns(conn: sqlite3.Connection) -> None:
             conn.execute(
                 "UPDATE projects SET bootstrap_enabled = CASE WHEN bootstrap_mode = 'disabled' THEN 0 ELSE 1 END"
             )
+
+
+def attachments_root() -> Path:
+    # Attachment payloads live next to the db file so they share its data volume.
+    assert _db_path is not None
+    return _db_path.parent / "attachments"
 
 
 @contextmanager

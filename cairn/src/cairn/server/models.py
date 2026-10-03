@@ -36,6 +36,13 @@ class Hint(BaseModel):
     created_at: str
 
 
+class Attachment(BaseModel):
+    id: str
+    filename: str
+    size: int
+    created_at: str
+
+
 class ProjectReason(BaseModel):
     worker: str
     trigger: str
@@ -58,6 +65,7 @@ class ProjectSummary(ProjectMeta):
     working_intent_count: int
     unclaimed_intent_count: int
     hint_count: int
+    attachment_count: int
 
 
 class ProjectDetail(BaseModel):

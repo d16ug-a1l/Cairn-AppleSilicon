@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
+import shutil
 
-from cairn.server.db import get_conn
+from cairn.server.db import attachments_root, get_conn
 from cairn.server.models import (
     CompleteRequest,
     CreateProjectRequest,
@@ -52,7 +53,8 @@ def list_projects():
                 (SELECT COUNT(*) FROM intents WHERE project_id = p.id) AS intent_count,
                 (SELECT COUNT(*) FROM intents WHERE project_id = p.id AND concluded_at IS NULL AND worker IS NOT NULL) AS working_intent_count,
                 (SELECT COUNT(*) FROM intents WHERE project_id = p.id AND concluded_at IS NULL AND worker IS NULL) AS unclaimed_intent_count,
-                (SELECT COUNT(*) FROM hints WHERE project_id = p.id) AS hint_count
+                (SELECT COUNT(*) FROM hints WHERE project_id = p.id) AS hint_count,
+                (SELECT COUNT(*) FROM attachments WHERE project_id = p.id) AS attachment_count
             FROM projects p
             ORDER BY p.created_at
         """).fetchall()
@@ -69,6 +71,7 @@ def list_projects():
                 working_intent_count=row["working_intent_count"],
                 unclaimed_intent_count=row["unclaimed_intent_count"],
                 hint_count=row["hint_count"],
+                attachment_count=row["attachment_count"],
             )
             for row in rows
         ]
@@ -149,6 +152,7 @@ def delete_project(project_id: str):
     with get_conn() as conn:
         get_project_or_404(conn, project_id)
         conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+        shutil.rmtree(attachments_root() / project_id, ignore_errors=True)
 
 
 @router.put("/projects/{project_id}/title", response_model=ProjectMeta)

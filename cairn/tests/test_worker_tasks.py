@@ -5,6 +5,7 @@ from collections.abc import Iterator
 from cairn.dispatcher.protocol.client import ApiResult
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
 from cairn.dispatcher.runtime.process import ProcessResult
+from cairn.dispatcher.tasks.common import sync_attachments
 from cairn.dispatcher.workers.health import HealthResult
 from cairn.dispatcher.tasks import bootstrap, explore, reason
 
@@ -52,6 +53,7 @@ def test_reason_writes_graph_snapshot_and_creates_intent(monkeypatch) -> None:
         graph_yaml,
         config.workers[0],
         TaskCancellation(),
+        {},
     )
 
     assert outcome == "success"
@@ -96,6 +98,7 @@ def test_explore_early_plain_text_exit_uses_conclude_fallback(monkeypatch) -> No
         intent,
         config.workers[0],
         TaskCancellation(),
+        {},
     )
 
     assert outcome == "success"
@@ -131,6 +134,7 @@ def test_explore_healthcheck_failure_releases_claim(monkeypatch) -> None:
         intent,
         config.workers[0],
         TaskCancellation(),
+        {},
     )
 
     assert outcome == "unhealthy"
@@ -168,6 +172,7 @@ def test_bootstrap_success_concludes_fact_then_completes_project(monkeypatch) ->
         intent,
         config.workers[0],
         TaskCancellation(),
+        {},
     )
 
     assert outcome == "success"
@@ -207,6 +212,7 @@ def test_reason_complete_treats_inactive_project_as_success(monkeypatch) -> None
         "graph",
         config.workers[0],
         TaskCancellation(),
+        {},
     )
 
     assert outcome == "success"
@@ -247,7 +253,133 @@ def test_reason_startup_only_mode_skips_task_healthcheck(monkeypatch) -> None:
         "graph",
         config.workers[0],
         TaskCancellation(),
+        {},
     )
 
     assert outcome == "success"
     assert client.created_intents == [("proj_001", ["f001"], "next", "test-worker")]
+
+
+def test_sync_attachments_is_incremental_and_survives_failures() -> None:
+    config = make_config()
+    client = FakeClient(make_project())
+    containers = FakeContainerManager()
+    synced: dict[str, set[str]] = {}
+
+    client.attachments = [
+        {"id": "a001", "filename": "challenge.zip", "size": 4, "created_at": "2026-01-01T00:00:03Z"}
+    ]
+    client.attachment_blobs = {"a001": b"zip!"}
+
+    attachments = sync_attachments(config, client, containers, "container-proj_001", "proj_001", synced)
+    assert [a["id"] for a in attachments] == ["a001"]
+    assert containers.binary_writes == [
+        ("container-proj_001", "/home/kali/workspace/attachments/challenge.zip", b"zip!")
+    ]
+    assert synced == {"proj_001": {"a001"}}
+
+    # a second run with the same set does not re-download
+    sync_attachments(config, client, containers, "container-proj_001", "proj_001", synced)
+    assert client.downloaded_attachments == [("proj_001", "a001")]
+
+    # listing or download failures only log, they never raise
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("server unreachable")
+
+    client.list_attachments = _boom  # type: ignore[method-assign]
+    assert sync_attachments(config, client, containers, "container-proj_001", "proj_001", synced) == []
+
+    client.list_attachments = lambda _project_id: [
+        {"id": "a002", "filename": "later.bin", "size": 1, "created_at": "2026-01-01T00:00:04Z"}
+    ]
+    client.download_attachment = _boom  # type: ignore[method-assign]
+    sync_attachments(config, client, containers, "container-proj_001", "proj_001", synced)
+    assert synced == {"proj_001": {"a001"}}
+
+
+def test_bootstrap_syncs_attachments_and_lists_them_in_prompt(monkeypatch) -> None:
+    config = make_config()
+    intent = make_intent()
+    project = make_project(intents=[intent])
+    client = FakeClient(project)
+    client.attachments = [
+        {"id": "a001", "filename": "challenge.zip", "size": 4, "created_at": "2026-01-01T00:00:03Z"}
+    ]
+    client.attachment_blobs = {"a001": b"zip!"}
+    containers = FakeContainerManager()
+    driver = FakeDriver()
+    lease = FakeLease()
+    synced: dict[str, set[str]] = {}
+
+    monkeypatch.setattr(bootstrap, "get_driver", lambda *_a, **_k: driver)
+    monkeypatch.setattr(bootstrap.HeartbeatLease, "for_intent", _lease_factory(lease))
+    monkeypatch.setattr(
+        bootstrap,
+        "run_worker_process",
+        lambda *_args, **_kwargs: ProcessResult(
+            0,
+            '{"accepted":true,"data":{"fact":{"description":"solved"},'
+            '"complete":{"description":"goal met"}}}',
+            "",
+        ),
+    )
+
+    outcome = bootstrap.run_bootstrap_task(
+        config,
+        client,
+        containers,
+        project,
+        intent,
+        config.workers[0],
+        TaskCancellation(),
+        synced,
+    )
+
+    assert outcome == "success"
+    assert client.downloaded_attachments == [("proj_001", "a001")]
+    assert containers.binary_writes == [
+        ("container-proj_001", "/home/kali/workspace/attachments/challenge.zip", b"zip!")
+    ]
+    assert synced == {"proj_001": {"a001"}}
+    assert "challenge.zip" in driver.execute_prompts[0]
+    assert "/home/kali/workspace/attachments/" in driver.execute_prompts[0]
+
+
+def test_bootstrap_without_attachments_performs_no_sync_writes(monkeypatch) -> None:
+    config = make_config()
+    intent = make_intent()
+    project = make_project(intents=[intent])
+    client = FakeClient(project)
+    containers = FakeContainerManager()
+    driver = FakeDriver()
+    lease = FakeLease()
+    synced: dict[str, set[str]] = {}
+
+    monkeypatch.setattr(bootstrap, "get_driver", lambda *_a, **_k: driver)
+    monkeypatch.setattr(bootstrap.HeartbeatLease, "for_intent", _lease_factory(lease))
+    monkeypatch.setattr(
+        bootstrap,
+        "run_worker_process",
+        lambda *_args, **_kwargs: ProcessResult(
+            0,
+            '{"accepted":true,"data":{"fact":{"description":"solved"},'
+            '"complete":{"description":"goal met"}}}',
+            "",
+        ),
+    )
+
+    outcome = bootstrap.run_bootstrap_task(
+        config,
+        client,
+        containers,
+        project,
+        intent,
+        config.workers[0],
+        TaskCancellation(),
+        synced,
+    )
+
+    assert outcome == "success"
+    assert client.downloaded_attachments == []
+    assert containers.binary_writes == []
+    assert synced == {"proj_001": set()}

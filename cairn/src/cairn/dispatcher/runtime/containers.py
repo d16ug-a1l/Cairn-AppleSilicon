@@ -195,7 +195,13 @@ class ContainerManager:
         return ManagedProcess(container, argv, env)
 
     def write_text_file(self, container_name: str, path: str, content: str) -> None:
-        archive_path, archive = self._text_file_archive(path, content)
+        self._write_archive(container_name, path, content.encode("utf-8"))
+
+    def write_binary_file(self, container_name: str, path: str, content: bytes) -> None:
+        self._write_archive(container_name, path, content)
+
+    def _write_archive(self, container_name: str, path: str, payload: bytes) -> None:
+        archive_path, archive = self._file_archive(path, payload)
         container = self._require_container(container_name)
         try:
             ok = container.put_archive(archive_path, archive)
@@ -237,6 +243,10 @@ class ContainerManager:
 
     @staticmethod
     def _text_file_archive(path: str, content: str) -> tuple[str, bytes]:
+        return ContainerManager._file_archive(path, content.encode("utf-8"))
+
+    @staticmethod
+    def _file_archive(path: str, payload: bytes) -> tuple[str, bytes]:
         target = PurePosixPath(path)
         if not target.is_absolute() or target.name in ("", ".", ".."):
             raise ValueError(f"container file path must be absolute: {path}")
@@ -250,7 +260,6 @@ class ContainerManager:
             archive_path = f"/{parts[0]}"
             archive_parts = parts[1:]
 
-        payload = content.encode("utf-8")
         stream = io.BytesIO()
         with tarfile.open(fileobj=stream, mode="w") as archive:
             parent = ""

@@ -94,6 +94,12 @@ Hint 代表外部补充的高纬输入，不属于探索执行本身。因此项
 
 除了人工补充的策略提示，Hint 也适合用于消费者之间传递**态势评估**。随着图增长，大量已排除的方向会稀释有效信息。消费者在完成一轮探索后，可将对当前局势的判断写为 Hint（如"SSH 和 SQL 注入方向均已排除，攻击面集中在文件上传功能"），帮助后续消费者快速定位重点，降低每轮读图的认知成本。
 
+### Attachment
+
+项目附件，CTF 题目附带的文件（zip/pcap/二进制等）。不属于事实图，只是项目的外部输入材料：服务端持久化保存文件本体与元数据，消费者（如 Dispatcher）在任务启动前把附件同步进执行环境，供 Agent 读取分析。
+
+附件只可追加与删除，不可修改；文件内容不入图、不入 SQLite，服务端只保存元数据，文件本体存放在服务端数据目录下。无论项目处于 `active`、`stopped` 还是 `completed`，都允许上传、下载与删除附件。
+
 ---
 
 ## 数据结构
@@ -165,6 +171,17 @@ creator         # 提示的作者
 created_at
 ```
 
+### Attachment
+
+```
+id              # 项目内序号生成（如 a001）
+filename        # 原始文件名（服务端已去除目录成分）
+size            # 字节数
+created_at
+```
+
+附件元数据按项目隔离，主键为 `(id, project_id)`。文件本体存储在服务端数据库同级目录下的 `attachments/<project_id>/<id>_<filename>`，不在 SQLite 中；删除项目时该目录一并删除。
+
 ### Settings
 
 ```
@@ -234,7 +251,8 @@ Body：
     "intent_count": 5,
     "working_intent_count": 2,
     "unclaimed_intent_count": 1,
-    "hint_count": 3
+    "hint_count": 3,
+    "attachment_count": 2
   }
 ]
 ```
@@ -464,6 +482,43 @@ Body：
 
 ---
 
+### Attachments
+
+#### POST /projects/{project_id}/attachments?filename=<name>
+
+上传一个附件。请求体是文件的原始字节流（不使用 multipart），文件名通过 `filename` 查询参数传递。服务端只保留文件名的 basename（去除目录成分），为空或退化为 `.` / `..` 时返回 `400`；项目不存在返回 `404`。附件上传是图外输入写操作，`active`、`stopped` 和 `completed` 项目均允许。
+
+响应 `201`，返回 Attachment 元数据：
+
+```json
+{
+  "id": "a001",
+  "filename": "chall.zip",
+  "size": 1048576,
+  "created_at": "2026-03-21T10:00:05Z"
+}
+```
+
+---
+
+#### GET /projects/{project_id}/attachments
+
+返回项目的附件元数据列表，按 `created_at` 升序，不含文件内容。
+
+---
+
+#### GET /projects/{project_id}/attachments/{attachment_id}
+
+下载附件，响应体为原始字节，`Content-Disposition` 携带原始文件名。附件记录不存在或文件本体缺失时返回 `404`。
+
+---
+
+#### DELETE /projects/{project_id}/attachments/{attachment_id}
+
+删除附件元数据与文件本体，返回 `204`。附件不存在返回 `404`。
+
+---
+
 ### Intents
 
 #### POST /projects/{project_id}/intents
@@ -654,7 +709,7 @@ Body：
 
 #### GET /projects/{project_id}/export?format=yaml
 
-返回项目图的 YAML 结构化快照，供消费者读取。不含 `last_heartbeat_at`。尚无结论的 Intent（`to=null`）出现在 YAML 中，`worker` 字段直接反映当前是否有消费者在处理。`project.reason` 不在导出中出现，因为它是项目级协调状态，不属于事实图。读取时服务端仍会执行超时清理，因此导出结果反映的是清理后的当前状态。`created_at` 和 `concluded_at` 按服务端当前时区格式化为 `YYYY-MM-DD HH:mm:ss`。
+返回项目图的 YAML 结构化快照，供消费者读取。不含 `last_heartbeat_at`。尚无结论的 Intent（`to=null`）出现在 YAML 中，`worker` 字段直接反映当前是否有消费者在处理。`project.reason` 不在导出中出现，因为它是项目级协调状态，不属于事实图。读取时服务端仍会执行超时清理，因此导出结果反映的是清理后的当前状态。`created_at` 和 `concluded_at` 按服务端当前时区格式化为 `YYYY-MM-DD HH:mm:ss`。项目有附件时，导出中包含 `attachments` 元数据列表（仅 `filename` 与 `size`，不含文件内容），供消费者感知附件的存在。
 
 ```yaml
 project:
@@ -670,6 +725,10 @@ hints:
   - content: "注意 80 端口"
     creator: "human"
     created_at: "2026-03-21 18:00:00"
+
+attachments:
+  - filename: "chall.zip"
+    size: 1048576
 
 facts:
   - id: origin
