@@ -108,8 +108,6 @@ https://github.com/user-attachments/assets/e557b1ac-dda4-41cb-87dd-9d56dbf05133
 
 **Cairn Dispatcher** 读取图、调度任务、创建和销毁 Worker 容器，是协议的唯一写入方。每个项目有独立的 Worker 容器；容器内多个 Agent Worker 并发运行。Agent Worker 只接收 prompt，返回结构化输出。
 
-Worker 也可以不跑在容器里，而是直接运行在 Dispatcher 所在的宿主机上 —— **本地模式**，无需 Docker。见下文 [本地模式（无需 Docker）](#本地模式无需-docker)。
-
 支持的 Worker 后端：**Claude Code**、**Codex**、**Pi**。
 
 ## 实战成绩
@@ -135,22 +133,28 @@ Worker 也可以不跑在容器里，而是直接运行在 Dispatcher 所在的�
 **前置条件**
  
 - macOS（Apple Silicon，M 系列芯片）
-- [OrbStack](https://orbstack.dev/) —— 在 macOS 上提供 Docker 环境（仅容器执行模式需要；本地模式不需要）
-- Python ≥ 3.12
+- [OrbStack](https://orbstack.dev/) —— 在 macOS 上提供 Docker 环境
+- Python ≥ 3.12（仅运行测试套件需要；部署全在 Docker 内完成）
 
-### 一键构建（推荐）
+### 一键构建启动（推荐）
 
 ```bash
 ./build.sh
 ```
 
-自动完成：环境检查（缺失的 git / uv / OrbStack 自动通过 Homebrew 安装，并自动拉起 OrbStack）→ 安装 Python 依赖（PyPI 走阿里云镜像）→ 本地构建 arm64 worker 镜像（Kali 基础镜像走国内镜像站）→ 从 `dispatch.example.yaml` 创建 `dispatch.yaml` → 运行测试验证。构建完成后编辑 `dispatch.yaml` 填入 LLM 端点和 API key，然后 `./cairn.sh start` 即可启动。
+自动完成：环境检查（缺失的 git / uv / OrbStack 自动通过 Homebrew 安装，并自动拉起 OrbStack）→ 探测构建状态 —— 已完成构建则直接使用本地镜像启动；未完成则走完整流程：安装 Python 依赖（PyPI 走阿里云镜像）→ 本地构建 arm64 worker 镜像（Kali 基础镜像走国内镜像站）→ 从 `dispatch.example.yaml` 创建 `dispatch.yaml` → 运行测试验证 → 探测多个 GHCR 镜像源（南大 / linkos / 上游）并自动选用第一个连通的源构建应用镜像 → `docker compose up -d` 启动。启动失败时会询问是否重新构建。构建完成后编辑 `dispatch.yaml` 填入 LLM 端点和 API key 即可。
+
+日常管理服务（start / stop / restart / status / logs，compose 封装，stop 时自动清理残留 worker 容器）：
+
+```bash
+./cairn.sh status
+```
 
 以下为手动分步方式：
 
 ### 构建 worker 镜像
  
-两种部署方式都需要 Worker 容器镜像。本项目仅构建 **arm64** 版本（上游 GHCR 预构建镜像仅有 amd64，故改为本地构建；Kali 基础镜像通过国内镜像站获取）：
+Worker 容器镜像需要本地构建。本项目仅构建 **arm64** 版本（上游 GHCR 预构建镜像仅有 amd64，故改为本地构建；Kali 基础镜像通过国内镜像站获取）：
  
 ```bash
 docker build --platform=linux/arm64 \
@@ -158,15 +162,15 @@ docker build --platform=linux/arm64 \
   -t ghcr.io/oritera/cairn-worker-container:latest ./container
 ```
 
-镜像 tag 保持配置中使用的规范名称，`dispatch.yaml` 和 `cairn.sh` 无需改动。首次构建需下载数 GB 依赖，耗时较长。
+镜像 tag 保持配置中使用的规范名称，`dispatch.yaml` 无需改动。首次构建需下载数 GB 依赖，耗时较长。
 
-创建本地 Dispatcher 配置，填入你的 LLM 端点和 API key：
+创建 Dispatcher 配置，填入你的 LLM 端点和 API key：
 
 ```bash
 cp dispatch.example.yaml dispatch.yaml
 ```
  
-### Docker Compose（推荐）
+### 启动（Docker Compose）
  
 拉取构建 Cairn 所需的基础镜像（根 `Dockerfile` 默认已使用南京大学 GHCR 镜像站，此步仅为预热）：
  
@@ -179,35 +183,6 @@ docker compose up --build
 ```
  
 这会启动 `cairn-server`（端口 `8000`），并在其通过健康检查后启动 `cairn-dispatcher`。Dispatcher 挂载项目根目录的 `dispatch.yaml`，并通过宿主机 socket 连接 Docker。数据持久化到 `./datas/cairn/`。
- 
-### 手动方式
- 
-```bash
-# 启动服务器
-uv run --project cairn cairn serve
- 
-# 启动 Dispatcher
-uv run --project cairn cairn dispatch --config dispatch.yaml
- 
-# 仅运行启动健康检查
-uv run --project cairn cairn dispatch --config dispatch.yaml --startup-healthcheck-only
-```
-
-### 本地模式（无需 Docker）
-
-Worker 可以不跑在每项目一个的容器里，而是直接运行在 Dispatcher 所在的宿主机上，复用本机已配置好的 `claude` / `codex` / `pi` CLI —— 无需 Docker，配置中也无需 API key。
-
-```bash
-cp dispatch.local.example.yaml dispatch.yaml
-
-# 启动服务器
-uv run --project cairn cairn serve
-
-# 在安装了这些 CLI 并已登录的同一台宿主机上运行 Dispatcher
-uv run --project cairn cairn dispatch --config dispatch.yaml
-```
-
-本地模式通过 `runtime.execution: local` 启用（见 `dispatch.local.example.yaml`）。启动时 Dispatcher 会检查每个配置的 Worker CLI 是否已安装且可运行，并提醒它们必须已登录。每个项目在 `local.workspace_root`（默认：Dispatcher 的当前目录）下获得一个独立工作目录。请直接在宿主机上运行 Dispatcher —— 不要放在 Docker 里 —— 因为 Agent 以你的用户权限运行且没有沙箱。
 
 ### 测试
 

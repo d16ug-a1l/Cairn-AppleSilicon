@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import logging
-import shutil
-import subprocess
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
@@ -10,15 +8,13 @@ from pathlib import Path
 
 import requests
 
-from cairn.dispatcher.config import DispatchConfig, LocalConfig, WorkerConfig
+from cairn.dispatcher.config import DispatchConfig, WorkerConfig
 from cairn.dispatcher.models import ReasonCheckpoint, RunningTask
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
 from cairn.dispatcher.runtime.containers import ContainerManager
-from cairn.dispatcher.runtime.local_backend import LocalBackend
 from cairn.dispatcher.runtime.startup_healthcheck import format_failure_summary, run_startup_healthchecks
 from cairn.dispatcher.scheduler.worker_select import choose_worker
-from cairn.dispatcher.workers.registry import get_driver
 from cairn.dispatcher.tasks.bootstrap import run_bootstrap_task
 from cairn.dispatcher.tasks.explore import run_explore_task
 from cairn.dispatcher.tasks.reason import run_reason_task
@@ -45,11 +41,8 @@ class DispatcherLoop:
         self.config_path = config_path
         self.config = DispatchConfig.load(config_path)
         self.client = CairnClient(self.config.server)
-        if self.config.runtime.execution == "local":
-            self.container_manager = LocalBackend(self.config.local or LocalConfig())
-        else:
-            assert self.config.container is not None
-            self.container_manager = ContainerManager(self.config.container)
+        assert self.config.container is not None
+        self.container_manager = ContainerManager(self.config.container)
         self.executor = ThreadPoolExecutor(max_workers=self.config.runtime.max_workers)
         self.cleanup_executor = ThreadPoolExecutor(max_workers=max(1, min(8, self.config.runtime.max_workers)))
         self.futures: dict[Future[str], RunningTask] = {}
@@ -61,6 +54,7 @@ class DispatcherLoop:
         self._log_state: dict[str, tuple[int, str, tuple[object, ...]]] = {}
         self._cleanup_pending: set[str] = set()
         self._inactive_cleanup_done: dict[str, str] = {}
+        self._synced_attachments: dict[str, set[str]] = {}
         self.project_cursor = 0
         self._settings_checked = False
         self._startup_healthchecks_checked = False
@@ -118,75 +112,12 @@ class DispatcherLoop:
     def run_startup_healthchecks(self, *, show_commands: bool = False, force: bool = False) -> None:
         if self._startup_healthchecks_checked:
             return
-        if self.config.runtime.execution == "local":
-            self._run_local_binary_check()
-            self._startup_healthchecks_checked = True
-            return
         if not force and self.config.runtime.worker_healthcheck == "disabled":
             LOG.info("skip startup worker healthchecks because runtime.worker_healthcheck=disabled")
             self._startup_healthchecks_checked = True
             return
         self._run_startup_healthchecks(show_commands=show_commands)
         self._startup_healthchecks_checked = True
-
-    def _run_local_binary_check(self) -> None:
-        binaries: dict[str, list[str]] = {}
-        for worker in self.config.workers:
-            binary = get_driver(worker.type, "local").local_binary()
-            if binary is None:
-                continue
-            binaries.setdefault(binary, []).append(worker.name)
-        if not binaries:
-            return
-
-        LOG.info("[*] Local execution: checking %d worker CLI(s) on this host", len(binaries))
-        available: list[str] = []
-        missing: list[str] = []
-        for binary in sorted(binaries):
-            workers = ", ".join(sorted(binaries[binary]))
-            path, runnable = self._probe_local_cli(binary)
-            if path is None:
-                missing.append(binary)
-                LOG.error("[-] %-8s not found on PATH (workers: %s)", binary, workers)
-            elif runnable:
-                available.append(binary)
-                LOG.info("[+] %-8s %s (workers: %s)", binary, path, workers)
-            else:
-                available.append(binary)
-                LOG.warning("[!] %-8s %s found but `%s --help` failed (workers: %s)", binary, path, binary, workers)
-
-        if not available:
-            raise RuntimeError(
-                "local execution: none of the configured worker CLIs are installed on PATH ("
-                + ", ".join(sorted(binaries))
-                + "). Install them and make sure each runs directly from your shell, then retry."
-            )
-        if missing:
-            LOG.warning(
-                "[!] Missing CLIs, their workers cannot run: %s. Install them or drop those workers.",
-                ", ".join(sorted(missing)),
-            )
-        LOG.warning(
-            "[!] Local mode uses each CLI's own host config: make sure %s already logged in / "
-            "configured and usable directly (e.g. `claude -p ...` works) — Cairn injects no API keys.",
-            ", ".join(sorted(available)),
-        )
-
-    @staticmethod
-    def _probe_local_cli(binary: str) -> tuple[str | None, bool]:
-        path = shutil.which(binary)
-        if path is None:
-            return None, False
-        try:
-            result = subprocess.run(
-                [binary, "--help"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=15,
-            )
-        except (OSError, subprocess.SubprocessError):
-            return path, False
-        return path, result.returncode == 0
 
     def _dispatch_available(self, summaries: list[ProjectSummary]) -> None:
         if len(self.futures) >= self.config.runtime.max_workers:
@@ -407,6 +338,7 @@ class DispatcherLoop:
                 export_yaml,
                 worker,
                 cancellation := TaskCancellation(),
+                self._synced_attachments,
             )
         except Exception:
             LOG.exception("failed to submit reason task project=%s worker=%s", project.project.id, worker.name)
@@ -474,6 +406,7 @@ class DispatcherLoop:
                 intent,
                 worker,
                 cancellation := TaskCancellation(),
+                self._synced_attachments,
             )
         except Exception:
             LOG.exception("failed to submit bootstrap task project=%s intent=%s worker=%s", project.project.id, intent.id, worker.name)
@@ -533,6 +466,7 @@ class DispatcherLoop:
                 intent,
                 worker,
                 cancellation := TaskCancellation(),
+                self._synced_attachments,
             )
         except Exception:
             LOG.exception("failed to submit explore task project=%s intent=%s worker=%s", project.project.id, intent.id, worker.name)
@@ -826,6 +760,10 @@ class DispatcherLoop:
                 success = future.result()
                 if success and project_id is not None and target_status in ("completed", "stopped"):
                     self._inactive_cleanup_done[project_id] = target_status
+                    if target_status == "completed":
+                        # A cleaned-up completed project loses its workspace, so any
+                        # reopened project must sync its attachments from scratch.
+                        self._synced_attachments.pop(project_id, None)
                 elif project_id is not None:
                     self._inactive_cleanup_done.pop(project_id, None)
             except Exception:

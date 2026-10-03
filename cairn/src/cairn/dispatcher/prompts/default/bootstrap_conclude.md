@@ -40,3 +40,9 @@ Normal return example:
 ```
 {hints}
 ```
+
+## Attachments
+The following files have been uploaded as project attachments. They are stored in `/home/kali/workspace/attachments/`:
+```
+{attachments}
+```

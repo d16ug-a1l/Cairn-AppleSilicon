@@ -11,9 +11,6 @@ ANTHROPIC_VERSION = "2023-06-01"
 class ClaudeCodeDriver(SeedSessionDriver):
     type_name = "claudecode"
 
-    def local_binary(self) -> str | None:
-        return "claude"
-
     def check_health(self, worker: WorkerConfig, *, timeout: float) -> HealthResult:
         env = worker.env
         return http_ping(

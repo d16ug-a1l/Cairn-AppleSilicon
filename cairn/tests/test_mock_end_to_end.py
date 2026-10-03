@@ -49,6 +49,16 @@ class InProcessClient:
         response.raise_for_status()
         return response.text
 
+    def list_attachments(self, project_id: str) -> list[dict[str, Any]]:
+        response = self.http.get(f"/projects/{project_id}/attachments")
+        response.raise_for_status()
+        return response.json()
+
+    def download_attachment(self, project_id: str, attachment_id: str) -> bytes:
+        response = self.http.get(f"/projects/{project_id}/attachments/{attachment_id}")
+        response.raise_for_status()
+        return response.content
+
     def heartbeat(self, project_id: str, intent_id: str, worker: str) -> ApiResult:
         return self._post(f"/projects/{project_id}/intents/{intent_id}/heartbeat", {"worker": worker})
 
@@ -88,7 +98,7 @@ class InProcessClient:
         return ApiResult(response.status_code, data, response.text)
 
 
-class LocalProcess:
+class SubprocessExecProcess:
     def __init__(self, command: list[str], env: dict[str, str]):
         self.command = command
         self.env = env
@@ -136,15 +146,16 @@ class LocalProcess:
         self.kill()
 
 
-class LocalContainerManager:
+class SubprocessContainerManager:
     def __init__(self) -> None:
         self.writes: list[tuple[str, str, str]] = []
+        self.binary_writes: list[tuple[str, str, bytes]] = []
 
     def close(self) -> None:
         return None
 
     def container_name(self, project_id: str) -> str:
-        return f"local-{project_id}"
+        return f"container-{project_id}"
 
     def ensure_running(self, project_id: str) -> str:
         return self.container_name(project_id)
@@ -156,13 +167,16 @@ class LocalContainerManager:
         command: list[str],
         timeout_seconds: int | None = None,
         kill_after_seconds: int = 5,
-    ) -> LocalProcess:
+    ) -> SubprocessExecProcess:
         assert timeout_seconds is not None
         assert kill_after_seconds == 5
-        return LocalProcess(command, env)
+        return SubprocessExecProcess(command, env)
 
     def write_text_file(self, container_name: str, path: str, content: str) -> None:
         self.writes.append((container_name, path, content))
+
+    def write_binary_file(self, container_name: str, path: str, content: bytes) -> None:
+        self.binary_writes.append((container_name, path, content))
 
     def needs_completed_cleanup(self, _project_id: str) -> bool:
         return False
@@ -246,7 +260,7 @@ def _config(
     )
 
 
-def _loop(config: DispatchConfig, client: InProcessClient, containers: LocalContainerManager) -> DispatcherLoop:
+def _loop(config: DispatchConfig, client: InProcessClient, containers: SubprocessContainerManager) -> DispatcherLoop:
     loop = DispatcherLoop.__new__(DispatcherLoop)
     loop.config = config
     loop.client = client
@@ -262,6 +276,7 @@ def _loop(config: DispatchConfig, client: InProcessClient, containers: LocalCont
     loop._log_state = {}
     loop._cleanup_pending = set()
     loop._inactive_cleanup_done = {}
+    loop._synced_attachments = {}
     loop.project_cursor = 0
     return loop
 
@@ -291,7 +306,7 @@ def _create_project(http: TestClient) -> str:
 
 def test_mock_scheduler_bootstrap_completes_project_end_to_end(http_client: TestClient) -> None:
     client = InProcessClient(http_client)
-    containers = LocalContainerManager()
+    containers = SubprocessContainerManager()
     loop = _loop(
         _config(
             bootstrap=_phase("complete"),
@@ -316,7 +331,7 @@ def test_mock_scheduler_bootstrap_completes_project_end_to_end(http_client: Test
 
 def test_mock_scheduler_runs_reason_explore_reason_complete_chain(http_client: TestClient) -> None:
     client = InProcessClient(http_client)
-    containers = LocalContainerManager()
+    containers = SubprocessContainerManager()
     loop = _loop(
         _config(
             bootstrap=_phase("complete"),
@@ -356,7 +371,7 @@ def test_mock_scheduler_enabled_project_skips_bootstrap_when_worker_does_not_sup
     http_client: TestClient,
 ) -> None:
     client = InProcessClient(http_client)
-    containers = LocalContainerManager()
+    containers = SubprocessContainerManager()
     loop = _loop(
         _config(
             bootstrap=_phase("complete"),
@@ -383,7 +398,7 @@ def test_mock_scheduler_enabled_project_skips_bootstrap_when_worker_does_not_sup
 
 def test_task_healthcheck_healthy_worker_completes_end_to_end(http_client: TestClient) -> None:
     client = InProcessClient(http_client)
-    containers = LocalContainerManager()
+    containers = SubprocessContainerManager()
     loop = _loop(
         _config(
             bootstrap=_phase("complete"),
@@ -408,7 +423,7 @@ def test_task_healthcheck_healthy_worker_completes_end_to_end(http_client: TestC
 
 def test_task_healthcheck_failure_aborts_task_and_cools_down_worker(http_client: TestClient) -> None:
     client = InProcessClient(http_client)
-    containers = LocalContainerManager()
+    containers = SubprocessContainerManager()
     loop = _loop(
         _config(
             bootstrap=_phase("complete"),
@@ -478,7 +493,7 @@ def _failover_config() -> DispatchConfig:
 
 def test_unhealthy_worker_fails_over_to_healthy_worker(http_client: TestClient) -> None:
     client = InProcessClient(http_client)
-    containers = LocalContainerManager()
+    containers = SubprocessContainerManager()
     loop = _loop(_failover_config(), client, containers)
     project_id = _create_project(http_client)
 

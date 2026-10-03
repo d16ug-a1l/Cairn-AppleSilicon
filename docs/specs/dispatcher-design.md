@@ -165,7 +165,7 @@ Dispatcher 使用一个运行期配置文件：
 - 使用者只需要提供 `dispatch.yaml`
 - 任务 prompt 以 markdown 文件形式随代码分发，并通过 `runtime.prompt_group` 选择目录
 - Worker 的健康检查、命令模板、session 处理、二阶段收尾能力由对应 driver 实现
-- `runtime.execution` 选择执行后端：默认 `container`（每项目一个容器），或 `local`（worker 直接在 dispatcher 宿主机上以子进程运行，复用本机已配置好的 CLI，无需 Docker 与 API key）
+- 执行后端只有容器模式：每个项目一个常驻 Docker 容器（`runtime.execution` 仅接受 `container`，保留该字段只为对旧的 `local` 配置给出明确的校验错误）
 
 代码目录可以采用类似组织：
 
@@ -210,7 +210,7 @@ dispatcher/
 
 | 任务 | 触发条件 | 输入 | 输出 | 超时策略 |
 | --- | --- | --- | --- | --- |
-| `bootstrap` | 项目 `active`；`project.bootstrap_enabled=true`，且配置中存在支持 `bootstrap` 的 Worker 或项目已经存在保留 bootstrap intent；facts 只有 `origin` 和 `goal`；当前没有普通 intent；允许不存在 bootstrap intent，或只存在保留的 open `bootstrap` intent | `{origin}`、`{goal}`、`{hints}` | 主阶段成功时固定返回 `fact + complete`；收尾阶段只返回 `fact` | 双阶段：`timeout` 后可进入 `conclude_timeout` 收尾；两阶段都失败则 release 保留 intent，下轮仍按新项目重试 |
+| `bootstrap` | 项目 `active`；`project.bootstrap_enabled=true`，且配置中存在支持 `bootstrap` 的 Worker 或项目已经存在保留 bootstrap intent；facts 只有 `origin` 和 `goal`；当前没有普通 intent；允许不存在 bootstrap intent，或只存在保留的 open `bootstrap` intent | `{origin}`、`{goal}`、`{hints}`、`{attachments}` | 主阶段成功时固定返回 `fact + complete`；收尾阶段只返回 `fact` | 双阶段：`timeout` 后可进入 `conclude_timeout` 收尾；两阶段都失败则 release 保留 intent，下轮仍按新项目重试 |
 | `reason` | 项目 `active`；当前项目无未认领 intent；当前项目内无其他 `reason`；首次触发或满足“新态势”重触发条件 | `{graph_yaml}`、`{fact_ids}`、`{open_intents}` | `complete` 对象；或 `intent` 对象；或空 `data` | 仅 `timeout`；超时或非法结果直接作废，不写图 |
 | `explore` | 项目 `active`；存在一个当前可认领的未结论 intent | `{graph_yaml}`、`{intent_id}`、`{intent_description}` | 一个 Fact 结论描述 | 单阶段：超时直接作废；双阶段：超时或输出解析失败时可进入 `conclude` 收尾 |
 
@@ -232,10 +232,12 @@ dispatcher/
 - `{origin}`
 - `{goal}`
 - `{hints}`
+- `{attachments}`
 
 其中：
 
 - `{hints}` 是 JSON 数组文本，便于 Worker 在项目起始阶段快速吸收策略信息
+- `{attachments}` 是附件元数据 JSON 数组（`filename` 与 `size`），无附件时为 `[]`；prompt 中同时说明附件已存放在工作现场的 `attachments/` 子目录（容器模式为 `/home/kali/workspace/attachments/`）
 - `bootstrap` 不读取图 YAML，不依赖普通 intent 图结构
 
 #### 输出契约
@@ -515,6 +517,16 @@ dispatcher/
 - 清理本地任务状态
 - 只记日志
 
+### 附件同步
+
+项目可携带附件（CTF 题目文件等，见 server-protocol 的 Attachments 一节）。三类任务在 `ensure_running` 之后、执行 Worker 之前都会做一次附件同步：
+
+1. `GET /projects/{project_id}/attachments` 列出附件元数据
+2. 对每个尚未同步的附件：`GET /projects/{project_id}/attachments/{attachment_id}` 下载字节，通过 `put_archive` 写入容器的 `/home/kali/workspace/attachments/`
+3. Dispatcher 实例上按项目维护"已同步附件 id 集合"（`DispatcherLoop._synced_attachments`），因此同步是增量的：创建后补传的附件会在下一个任务启动时同步，已同步的不会重复下载
+
+同步是 best-effort：列表或下载失败只记 `warn`，不阻断任务——附件缺失不应让解题流程崩溃。项目完成并清理容器/工作目录后，该项目的已同步集合被清空，若项目之后被 `reopen`，附件会重新同步。附件元数据也随 export YAML 进入图快照，`reason` / `explore` 读图时自然能感知附件的存在。
+
 ---
 
 ## 调度策略
@@ -674,7 +686,7 @@ driver 按各自 provider 的协议构造请求：`claudecode` 打 `{base}/v1/me
 - 窗口结束后，后续轮次再次选择到这个 Worker 时重新检查
 - Dispatcher 内部会为最近失败的 Worker 记录一个本地 `retry_after`，在这之前不再派发给它
 
-Dispatcher 只看 HTTP 状态码，不解析响应体。`local` 模式下不打 API（本机 CLI 自带鉴权），改为启动时对各 CLI 执行 `--help` 探测。
+Dispatcher 只看 HTTP 状态码，不解析响应体。
 
 ### CLI 接入约定
 
@@ -876,12 +888,12 @@ codex exec resume "{session}" --dangerously-bypass-approvals-and-sandbox --model
 | `runtime.interval` | 是 | 统一节拍配置；既是 Dispatcher 主循环间隔，也是带 claim 任务的 heartbeat 周期 |
 | `runtime.healthcheck_timeout` | 是 | Worker 健康检查的统一外层 watchdog 超时 |
 | `runtime.worker_healthcheck` | 否 | Worker 健康检查模式：`startup_and_task`、`startup_only` 或 `disabled`；默认 `startup_only` |
-| `runtime.execution` | 否 | 执行后端：`container`（默认）或 `local`；`local` 时 worker 在 dispatcher 宿主机上以子进程运行，复用本机 CLI，启动时校验各 CLI 是否已安装可用 |
+| `runtime.execution` | 否 | 执行后端，仅接受 `container`（默认，也是唯一支持的模式；每个项目一个 Docker 容器）。保留该字段只为对旧的 `local` 配置给出明确校验错误 |
 | `runtime.prompt_group` | 是 | 当前使用的 prompt 组目录名 |
 
 ### `container.*`
 
-仅 `runtime.execution: container`（默认）时必填。
+必填（唯一的执行后端就是容器模式）。
 
 | 字段 | 必填 | 含义 |
 | --- | --- | --- |
@@ -898,15 +910,6 @@ codex exec resume "{session}" --dangerously-bypass-approvals-and-sandbox --model
 
 - completed project 的容器 cleanup 可以异步并行进行，不要求阻塞主调度循环
 - 如果项目已从 Server 删除，Dispatcher 会把找不到对应项目的 `cairn-dispatch-*` 容器视为 orphan，并执行 stop 清理
-
-### `local.*`
-
-仅 `runtime.execution: local` 时生效，`container` 模式下忽略。此时无需 `container.*`，worker 也不需要任何 LLM 环境变量；启动时 Dispatcher 会对每个已配置 worker 的 CLI 执行 `--help` 探测，全部缺失则报错退出。
-
-| 字段 | 必填 | 含义 |
-| --- | --- | --- |
-| `local.workspace_root` | 否 | 每项目工作目录的根；不填则取 dispatcher 启动时的当前目录，每项目分到隔离子目录 `<root>/<project_id>/` 作为 worker 进程的工作目录 |
-| `local.completed_action` | 否 | 项目 completed 后对工作目录的处理：`keep`（默认，保留现场）或 `remove` |
 
 ### `tasks.*`
 
@@ -1056,6 +1059,8 @@ workers:
 {goal}
 ### Hints JSON 数组
 {hints}
+### Attachments JSON 数组（附件已存放于工作现场 attachments/ 子目录）
+{attachments}
 ````
 
 ### `reason.md`
@@ -1178,4 +1183,6 @@ workers:
 {goal}
 ### Hints JSON 数组
 {hints}
+### Attachments JSON 数组
+{attachments}
 ````

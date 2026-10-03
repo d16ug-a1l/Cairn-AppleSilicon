@@ -9,10 +9,8 @@ from cairn.dispatcher.runtime.process import ExecProcess
 class ExecutionBackend(Protocol):
     """The execution substrate for worker processes.
 
-    Two implementations exist: ContainerManager (one Docker container per project) and
-    LocalBackend (host subprocesses, one working directory per project). The scheduler,
-    task runners and startup healthcheck only depend on this surface so the two backends
-    are interchangeable behind a single ``runtime.execution`` switch.
+    Implemented by ContainerManager (one Docker container per project). The scheduler,
+    task runners and startup healthcheck only depend on this surface.
     """
 
     def container_name(self, project_id: str) -> str: ...
@@ -29,6 +27,8 @@ class ExecutionBackend(Protocol):
     ) -> ExecProcess: ...
 
     def write_text_file(self, container_name: str, path: str, content: str) -> None: ...
+
+    def write_binary_file(self, container_name: str, path: str, content: bytes) -> None: ...
 
     def needs_completed_cleanup(self, project_id: str) -> bool: ...
 

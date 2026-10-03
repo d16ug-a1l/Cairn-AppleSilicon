@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from cairn.dispatcher.config import DispatchConfig, WorkerConfig
 from cairn.dispatcher.protocol.client import CairnClient
+from cairn.dispatcher.runtime.backend import ExecutionBackend
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
 from cairn.dispatcher.runtime.containers import ContainerManager
 from cairn.dispatcher.runtime.heartbeat import HeartbeatLease
@@ -15,6 +16,7 @@ from cairn.dispatcher.runtime.process import ProcessResult
 PROCESS_COMMUNICATE_GRACE_SECONDS = 15
 LOG_PREVIEW_LIMIT = 1200
 GRAPH_SNAPSHOT_ROOT = "/tmp/cairn-prompts"
+CONTAINER_WORKSPACE_DIR = "/home/kali/workspace"
 LOG = logging.getLogger(__name__)
 
 
@@ -48,9 +50,56 @@ def communicate_timeout(timeout_seconds: int, grace_seconds: int = PROCESS_COMMU
 
 
 def task_healthcheck_enabled(config: DispatchConfig) -> bool:
-    if config.runtime.execution == "local":
-        return False
     return config.runtime.worker_healthcheck == "startup_and_task"
+
+
+def sync_attachments(
+    config: DispatchConfig,
+    client: CairnClient,
+    backend: ExecutionBackend,
+    container_name: str,
+    project_id: str,
+    synced: dict[str, set[str]],
+) -> list[dict]:
+    """Best-effort copy of new project attachments into the worker workspace.
+
+    Returns the current attachment metadata list (empty when the listing fails).
+    Sync failures only log a warning: a missing attachment must not crash a task.
+    """
+    try:
+        attachments = client.list_attachments(project_id)
+    except Exception as exc:
+        LOG.warning("attachment listing failed project=%s error=%s", project_id, exc)
+        return []
+    done = synced.setdefault(project_id, set())
+    for attachment in attachments:
+        attachment_id = attachment.get("id")
+        filename = attachment.get("filename")
+        if not attachment_id or not filename or attachment_id in done:
+            continue
+        try:
+            content = client.download_attachment(project_id, attachment_id)
+            backend.write_binary_file(
+                container_name,
+                f"{CONTAINER_WORKSPACE_DIR}/attachments/{filename}",
+                content,
+            )
+        except Exception as exc:
+            LOG.warning(
+                "attachment sync failed project=%s attachment=%s error=%s",
+                project_id,
+                attachment_id,
+                exc,
+            )
+            continue
+        done.add(attachment_id)
+        LOG.info(
+            "attachment synced project=%s attachment=%s filename=%s",
+            project_id,
+            attachment_id,
+            filename,
+        )
+    return attachments
 
 
 def write_graph_snapshot_reference(

@@ -14,8 +14,7 @@ TaskType = Literal["reason", "explore", "bootstrap"]
 WorkerType = Literal["claudecode", "codex", "pi", "mock"]
 CompletedAction = Literal["remove", "stop"]
 WorkerHealthcheckMode = Literal["startup_and_task", "startup_only", "disabled"]
-ExecutionMode = Literal["container", "local"]
-LocalCompletedAction = Literal["keep", "remove"]
+ExecutionMode = Literal["container"]
 
 WORKER_ENV_KEYS: dict[WorkerType, tuple[str, ...]] = {
     "claudecode": (
@@ -41,8 +40,8 @@ DEFAULT_PROMPT_REQUIRED_TOKENS: dict[str, tuple[str, ...]] = {
     "reason.md": ("{graph_yaml}", "{fact_ids}", "{open_intents}", "{max_intents}"),
     "explore.md": ("{graph_yaml}", "{intent_id}", "{intent_description}"),
     "explore_conclude.md": ("{graph_yaml}", "{intent_id}", "{intent_description}"),
-    "bootstrap.md": ("{origin}", "{goal}", "{hints}"),
-    "bootstrap_conclude.md": ("{origin}", "{goal}", "{hints}"),
+    "bootstrap.md": ("{origin}", "{goal}", "{hints}", "{attachments}"),
+    "bootstrap_conclude.md": ("{origin}", "{goal}", "{hints}", "{attachments}"),
 }
 
 PROMPT_REQUIRED_TOKENS_BY_GROUP: dict[str, dict[str, tuple[str, ...]]] = {
@@ -157,11 +156,6 @@ class ContainerConfig(BaseModel):
     cap_add: list[str] = Field(default_factory=list)
 
 
-class LocalConfig(BaseModel):
-    workspace_root: str | None = None
-    completed_action: LocalCompletedAction = "keep"
-
-
 class RuntimeConfig(BaseModel):
     max_workers: int = Field(gt=0)
     max_running_projects: int = Field(gt=0)
@@ -194,9 +188,8 @@ class WorkerConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_env(self) -> "WorkerConfig":
-        # Required LLM env keys (base_url / key / model) are enforced per execution mode by
-        # DispatchConfig: container mode needs them, local mode reuses the host CLI config.
-        # The checks below are mode-independent and always apply.
+        # Required LLM env keys (base_url / key / model) are enforced by DispatchConfig
+        # for every worker. The checks below are worker-type specific and always apply.
         if self.type == "pi":
             _validate_optional_positive_int_env(self.name, self.env, "PI_MODEL_CONTEXT_WINDOW")
         if self.type == "mock":
@@ -211,7 +204,6 @@ class DispatchConfig(BaseModel):
     runtime: RuntimeConfig
     tasks: TasksConfig
     container: ContainerConfig | None = None
-    local: LocalConfig | None = None
     common_env: dict[str, str] = Field(default_factory=dict)
     workers: list[WorkerConfig]
 
@@ -257,18 +249,14 @@ class DispatchConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def validate_execution_mode(self) -> "DispatchConfig":
-        if self.runtime.execution == "container":
-            if self.container is None:
-                raise ValueError("container config is required when runtime.execution is container")
-            for worker in self.workers:
-                required = WORKER_ENV_KEYS[worker.type]
-                missing = [key for key in required if not worker.env.get(key)]
-                if missing:
-                    raise ValueError(f"worker {worker.name} missing env keys: {', '.join(missing)}")
-        else:  # local: workers reuse the host CLI config, so no LLM env keys are required
-            if self.local is None:
-                self.local = LocalConfig()
+    def validate_container_mode(self) -> "DispatchConfig":
+        if self.container is None:
+            raise ValueError("container config is required")
+        for worker in self.workers:
+            required = WORKER_ENV_KEYS[worker.type]
+            missing = [key for key in required if not worker.env.get(key)]
+            if missing:
+                raise ValueError(f"worker {worker.name} missing env keys: {', '.join(missing)}")
         return self
 
     @classmethod

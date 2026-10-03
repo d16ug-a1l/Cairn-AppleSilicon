@@ -21,6 +21,7 @@ from cairn.dispatcher.tasks.common import (
     did_timeout,
     preview,
     run_worker_process,
+    sync_attachments,
     task_healthcheck_enabled,
     write_graph_snapshot_reference,
 )
@@ -38,14 +39,23 @@ def run_reason_task(
     export_yaml: str,
     worker: WorkerConfig,
     cancellation: TaskCancellation,
+    synced_attachments: dict[str, set[str]],
 ) -> str:
-    driver = get_driver(worker.type, config.runtime.execution)
+    driver = get_driver(worker.type)
     task_started = time.perf_counter()
     healthcheck_timeout = config.runtime.healthcheck_timeout
     lease = HeartbeatLease.for_reason(client, project.project.id, worker.name, config.runtime.interval)
     lease.start()
     try:
         container_name = container_manager.ensure_running(project.project.id)
+        sync_attachments(
+            config,
+            client,
+            container_manager,
+            container_name,
+            project.project.id,
+            synced_attachments,
+        )
 
         if task_healthcheck_enabled(config):
             LOG.info(

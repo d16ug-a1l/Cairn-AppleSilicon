@@ -37,3 +37,9 @@ Only return the following after you have confirmed that Goal has been satisfied:
 ```
 {hints}
 ```
+
+## Attachments
+The following files have been uploaded as project attachments. They are stored in `/home/kali/workspace/attachments/`. Read and analyze them as needed:
+```
+{attachments}
+```

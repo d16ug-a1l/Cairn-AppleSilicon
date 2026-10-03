@@ -42,10 +42,13 @@ cairn/                        # Python 项目（uv 管理，包名 cairn）
   tests/                      # pytest，全离线，fakes 在 conftest.py
 container/                    # worker 容器镜像（Kali + 渗透工具 + agent CLI）
 docs/specs/                   # 权威中文设计文档
-dispatch.example.yaml         # 容器模式配置模板
-dispatch.local.example.yaml   # 本地模式配置模板（无 Docker）
+dispatch.example.yaml         # 配置模板（容器执行）
 dispatch_mock.yaml            # mock 驱动离线端到端配置
-cairn.sh                      # 宿主机管理脚本（start/stop/restart/status/logs）
+Dockerfile, docker-compose.yaml  # 应用镜像 + 双服务部署（唯一启动方式）
+build.sh                      # 一键构建启动脚本：探测构建状态，未构建走完整流程
+                              # （依赖→worker 镜像→配置→测试→多镜像源应用镜像构建），
+                              # 已构建直接用本地镜像启动，启动失败询问是否重建
+cairn.sh                      # 管理脚本（compose 封装）：start/stop/restart/status/logs
 ```
 
 技术栈：Python ≥ 3.12 + uv；FastAPI、uvicorn、click、PyYAML、docker SDK、requests、pydantic；存储为纯 SQLite（WAL 模式）。**无 linter/formatter、无 CI**，保持与现有代码风格一致（4 空格缩进、双引号、`from __future__ import annotations`、stdlib logging 惰性 `%s` 参数）。
@@ -53,11 +56,13 @@ cairn.sh                      # 宿主机管理脚本（start/stop/restart/statu
 常用命令：
 
 ```bash
-uv run --project cairn --group dev pytest          # 全部测试（~98 个，约 4 秒，全离线）
-uv run --project cairn cairn serve                 # 启动服务器（127.0.0.1:8000）
-uv run --project cairn cairn dispatch --config dispatch.yaml        # 启动调度器
+uv run --project cairn --group dev pytest          # 全部测试（~83 个，约 1 秒，全离线）
+uv run --project cairn cairn serve                 # 启动服务器（127.0.0.1:8000，开发调试用）
+uv run --project cairn cairn dispatch --config dispatch.yaml        # 启动调度器（开发调试用）
 uv run --project cairn cairn dispatch --config dispatch_mock.yaml   # mock 离线端到端
-./cairn.sh start|stop|restart|status|logs                            # 宿主机一体管理
+docker compose up --build                          # 正式部署（唯一启动方式）
+./build.sh                                         # 一键构建启动（探测构建状态 + 镜像源自动探测）
+./cairn.sh start|stop|restart|status|logs          # 日常管理（compose 封装）
 ```
 
 ---
@@ -166,14 +171,14 @@ Agent 只拿到渲染后的 prompt，返回**结构化 JSON**；Agent 自己从�
 
 ### 4.4 Worker 驱动层（`workers/`）
 
-ABC 在 `workers/base.py:18`：`check_health` / `build_execute` / `build_conclude` / `extract_session` / `extract_response_text` / `supports_conclude` / `local_binary`。便利基类：`SeedSessionDriver`（自生成 UUID）、`RegexSessionDriver`（从 stderr 正则抓 session）。
+ABC 在 `workers/base.py:18`：`check_health` / `build_execute` / `build_conclude` / `extract_session` / `extract_response_text` / `supports_conclude`。便利基类：`SeedSessionDriver`（自生成 UUID）、`RegexSessionDriver`（从 stderr 正则抓 session）。
 
-注册表 `workers/registry.py`：`DRIVERS`（容器模式）与 `LOCAL_DRIVERS`（本地模式）两张表。
+注册表 `workers/registry.py`：单张 `DRIVERS` 表，`get_driver(name)` 查表。
 
 四个适配器（`workers/adapters/`）：
 
 - **claudecode**：`claude --session-id <uuid> --dangerously-skip-permissions -p -- <prompt>`，收尾 `claude -r <session>`
-- **codex**：容器模式注入 `model_providers.cairn.*` 配置；session 从 stderr 提取；收尾 `codex exec resume <session>`
+- **codex**：注入 `model_providers.cairn.*` 配置；session 从 stderr 提取；收尾 `codex exec resume <session>`
 - **pi**：写 `models.json` 后 `pi --provider cairn --mode json ...`；输出解析 NDJSON 事件流
 - **mock**：内嵌 Python 脚本按 `MOCK_*` 概率产出契约 JSON 或故障，用于离线测试
 
@@ -181,8 +186,7 @@ ABC 在 `workers/base.py:18`：`check_health` / `build_execute` / `build_conclud
 
 接口 `backend.py:9`（`ExecutionBackend` Protocol）与 `process.py:27`（`ExecProcess`）。
 
-- **container 模式**（`containers.py`）：每项目一个常驻容器 `cairn-dispatch-<project_id>`（`sleep infinity`），`docker exec` 跑任务，coreutils `timeout -k` 包裹命令；`write_text_file` 手工构 tar 走 `put_archive`；清理分 completed/stopped/orphan 三种
-- **local 模式**（`local_backend.py` + `local_process.py`）：无容器，每项目工作目录 `<workspace_root>/<project_id>/`；继承宿主编环境 + worker.env；独立进程组，停止顺序 SIGTERM → 宽限 → SIGKILL 整组；复用宿主机已登录的 CLI，**无沙箱**
+- **container 模式**（`containers.py`，唯一的执行后端）：每项目一个常驻容器 `cairn-dispatch-<project_id>`（`sleep infinity`），`docker exec` 跑任务，coreutils `timeout -k` 包裹命令；`write_text_file` 手工构 tar 走 `put_archive`；清理分 completed/stopped/orphan 三种
 
 辅助组件：`heartbeat.py`（租约续期线程 + 失败 kill）、`cancellation.py`（线程安全的取消记录）、`startup_healthcheck.py`（并发检查所有 driver，全部失败才拒绝启动）。
 
@@ -191,10 +195,10 @@ ABC 在 `workers/base.py:18`：`check_health` / `build_execute` / `build_conclud
 单一 `dispatch.yaml`，pydantic 严格校验（`extra="forbid"`）：
 
 - `server`、`common_env`（并入每个 worker.env，worker 级覆盖）
-- `runtime`：`max_workers / max_running_projects / max_project_workers / interval / healthcheck_timeout`（必填）、`worker_healthcheck`（默认 `startup_only`）、`execution`（默认 `container`）、`prompt_group`
+- `runtime`：`max_workers / max_running_projects / max_project_workers / interval / healthcheck_timeout`（必填）、`worker_healthcheck`（默认 `startup_only`）、`execution`（仅接受 `container`，保留字段以对旧配置报错）、`prompt_group`
 - `tasks`：`bootstrap/explore` 需 `timeout + conclude_timeout`；`reason` 需 `timeout`；`max_intents` 默认 3
-- `container` / `local`：按 execution 模式分别强制要求
-- `workers[]`：`name`（全局唯一）、`type`、`task_types`、`max_running`、`priority`、`env`；容器模式强制要求各类型对应的 LLM env 键（`WORKER_ENV_KEYS`，config.py:20）
+- `container`：必填（`image` / `network_mode` / `completed_action` / 可选 `cap_add`）
+- `workers[]`：`name`（全局唯一）、`type`、`task_types`、`max_running`、`priority`、`env`；强制要求各类型对应的 LLM env 键（`WORKER_ENV_KEYS`，config.py:20）
 - **prompt token 校验**：default 组每个模板必须含规定占位符（config.py:294）
 - **MOCK_\* 校验**：每阶段 `delay` 区间 + `outcomes` 概率分布（Decimal 精确求和 = 1.0）、支持 `rules` 条件强制 outcome、未知 `MOCK_` 键直接拒绝
 
@@ -216,11 +220,11 @@ ABC 在 `workers/base.py:18`：`check_health` / `build_execute` / `build_conclud
 
 ## 6. 测试
 
-全部离线，约 98 个用例：`uv run --project cairn --group dev pytest`。
+全部离线，约 83 个用例：`uv run --project cairn --group dev pytest`。
 
 - **fakes**（`tests/conftest.py`）：`make_config` / `make_project` / `make_intent` 工厂；`FakeClient`、`FakeDriver`、`FakeContainerManager`、`FakeLease`。写 dispatcher 测试时通常 monkeypatch `workers.registry.get_driver` 返回 FakeDriver，直接调 `run_*_task`
 - **Server**：`test_server_api.py` 用 FastAPI `TestClient` + 临时 SQLite（monkeypatch 重置 `db._db_path`），覆盖全链路工作流、状态门禁、超时回收；`test_db_migrations.py` 验证旧库列迁移
-- **Dispatcher**：`test_scheduler_logic.py`（分派/选择/触发）、`test_worker_tasks.py`（三类任务与 conclude fallback）、`test_runtime_logic.py`、`test_config_and_adapters.py`、`test_contracts_and_drivers.py`、`test_healthcheck.py`、`test_local_execution.py`
+- **Dispatcher**：`test_scheduler_logic.py`（分派/选择/触发）、`test_worker_tasks.py`（三类任务与 conclude fallback）、`test_runtime_logic.py`、`test_config_and_adapters.py`、`test_contracts_and_drivers.py`、`test_healthcheck.py`
 - **mock 端到端**（`test_mock_end_to_end.py`）：真实 TestClient + 本地进程替换 Docker + `prompt_group: mock` + `MOCK_*` 强制 outcome，覆盖 bootstrap 直接完成、reason→explore 链、健康检查故障转移等
 
 新增行为时：在对应的现有 `test_*.py` 中加用例，复用 conftest 的 fakes。
@@ -232,7 +236,7 @@ ABC 在 `workers/base.py:18`：`check_health` / `build_execute` / `build_conclud
 **新增一个 worker 类型**（如接入新的 agent CLI）：
 1. `config.py:14` 的 `WorkerType` Literal 加类型名；`WORKER_ENV_KEYS`（config.py:20）声明其 env 键
 2. `workers/adapters/` 新建驱动（实现 `WorkerDriver` ABC），在 `adapters/__init__.py` 导出
-3. `workers/registry.py` 两张表注册（如需区分 local 变体）
+3. `workers/registry.py` 的 `DRIVERS` 表注册
 4. 如需新 prompt 占位符：更新 `DEFAULT_PROMPT_REQUIRED_TOKENS` 与 prompts 模板
 5. 测试加在 `test_config_and_adapters.py` / `test_contracts_and_drivers.py` / `test_healthcheck.py`
 
@@ -258,4 +262,4 @@ ABC 在 `workers/base.py:18`：`check_health` / `build_execute` / `build_conclud
 
 ## 9. 安全须知
 
-Cairn 是攻击性安全工具，**仅用于获得明确授权的测试目标**。worker 容器内 agent CLI 以危险免确认标志运行，dispatcher 挂载宿主机 Docker socket；local 模式以宿主机用户权限无沙箱运行。`dispatch.yaml` 含 API key，切勿提交。Server 无鉴权，注意绑定与暴露范围。
+Cairn 是攻击性安全工具，**仅用于获得明确授权的测试目标**。worker 容器内 agent CLI 以危险免确认标志运行，dispatcher 挂载宿主机 Docker socket。`dispatch.yaml` 含 API key，切勿提交。Server 无鉴权，注意绑定与暴露范围。

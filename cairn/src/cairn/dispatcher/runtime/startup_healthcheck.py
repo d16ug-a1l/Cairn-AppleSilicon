@@ -57,7 +57,7 @@ def format_failure_summary(results: list[StartupHealthcheckResult]) -> str:
 
 
 def _check_worker(config: DispatchConfig, worker: WorkerConfig) -> StartupHealthcheckResult:
-    driver = get_driver(worker.type, config.runtime.execution)
+    driver = get_driver(worker.type)
     started = time.perf_counter()
     result = driver.check_health(worker, timeout=config.runtime.healthcheck_timeout)
     duration_ms = int((time.perf_counter() - started) * 1000)

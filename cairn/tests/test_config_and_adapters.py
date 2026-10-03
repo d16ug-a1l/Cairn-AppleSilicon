@@ -133,3 +133,22 @@ def test_codex_driver_execute_argv_passes_model_endpoint_and_prompt() -> None:
     assert "gpt-test" in argv
     assert 'model_providers.cairn.base_url="http://api/v1"' in argv
     assert argv[-2:] == ["--", "prompt"]
+
+
+def test_dispatch_config_requires_container_block_and_worker_env() -> None:
+    payload = make_config().model_dump()
+    payload["container"] = None
+    with pytest.raises(ValidationError, match="container config is required"):
+        DispatchConfig.model_validate(payload)
+
+    payload = make_config().model_dump()
+    payload["workers"][0]["type"] = "codex"
+    with pytest.raises(ValidationError, match="missing env keys"):
+        DispatchConfig.model_validate(payload)
+
+
+def test_dispatch_config_rejects_local_execution_mode() -> None:
+    payload = make_config().model_dump()
+    payload["runtime"]["execution"] = "local"
+    with pytest.raises(ValidationError):
+        DispatchConfig.model_validate(payload)

@@ -9,7 +9,7 @@ from cairn.dispatcher.contracts import (
     validate_bootstrap_conclude_payload,
     validate_bootstrap_execute_payload,
 )
-from cairn.dispatcher.prompting import format_hints, load_prompt, render_prompt
+from cairn.dispatcher.prompting import format_attachments, format_hints, load_prompt, render_prompt
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
 from cairn.dispatcher.runtime.containers import ContainerManager
@@ -21,6 +21,7 @@ from cairn.dispatcher.tasks.common import (
     project_allows_conclude_fallback,
     preview,
     run_worker_process,
+    sync_attachments,
     task_healthcheck_enabled,
     write_conclude_result,
     write_conclude_result_with_fact_id,
@@ -39,14 +40,23 @@ def run_bootstrap_task(
     intent: Intent,
     worker: WorkerConfig,
     cancellation: TaskCancellation,
+    synced_attachments: dict[str, set[str]],
 ) -> str:
-    driver = get_driver(worker.type, config.runtime.execution)
+    driver = get_driver(worker.type)
     task_started = time.perf_counter()
     healthcheck_timeout = config.runtime.healthcheck_timeout
     lease = HeartbeatLease.for_intent(client, project.project.id, intent.id, worker.name, config.runtime.interval)
     lease.start()
     try:
         container_name = container_manager.ensure_running(project.project.id)
+        attachments = sync_attachments(
+            config,
+            client,
+            container_manager,
+            container_name,
+            project.project.id,
+            synced_attachments,
+        )
 
         if task_healthcheck_enabled(config):
             LOG.info(
@@ -91,7 +101,7 @@ def run_bootstrap_task(
 
         prompt = render_prompt(
             load_prompt(config.runtime.prompt_group, "bootstrap.md"),
-            _bootstrap_prompt_replacements(project),
+            _bootstrap_prompt_replacements(project, attachments),
         )
 
         session = driver.prepare_session()
@@ -159,6 +169,7 @@ def run_bootstrap_task(
                     driver,
                     project,
                     intent,
+                    attachments,
                     session,
                     lease,
                     cancellation,
@@ -206,6 +217,7 @@ def run_bootstrap_task(
                 driver,
                 project,
                 intent,
+                attachments,
                 session,
                 lease,
                 cancellation,
@@ -240,6 +252,7 @@ def _try_conclude_fallback(
     driver,
     project: ProjectDetail,
     intent: Intent,
+    attachments: list[dict],
     session: str | None,
     lease: HeartbeatLease,
     cancellation: TaskCancellation,
@@ -288,7 +301,7 @@ def _try_conclude_fallback(
 
     prompt = render_prompt(
         load_prompt(config.runtime.prompt_group, "bootstrap_conclude.md"),
-        _bootstrap_prompt_replacements(project),
+        _bootstrap_prompt_replacements(project, attachments),
     )
     conclude_argv = driver.build_conclude(worker, prompt, session)
     LOG.info("starting bootstrap conclude fallback project=%s intent=%s worker=%s", project.project.id, intent.id, worker.name)
@@ -381,7 +394,7 @@ def _try_conclude_fallback(
     )
 
 
-def _bootstrap_prompt_replacements(project: ProjectDetail) -> dict[str, str]:
+def _bootstrap_prompt_replacements(project: ProjectDetail, attachments: list[dict]) -> dict[str, str]:
     facts = {fact.id: fact.description for fact in project.facts}
     hints = [
         {
@@ -396,6 +409,7 @@ def _bootstrap_prompt_replacements(project: ProjectDetail) -> dict[str, str]:
         "origin": facts.get("origin", ""),
         "goal": facts.get("goal", ""),
         "hints": format_hints(hints),
+        "attachments": format_attachments(attachments),
     }
 
 

@@ -26,10 +26,10 @@ class ProcessResult:
 
 @runtime_checkable
 class ExecProcess(Protocol):
-    """A worker process, regardless of whether it runs inside a container or on the host.
+    """A worker process running inside a project container.
 
-    Container mode uses ManagedProcess; local mode uses LocalProcess. Both expose this
-    surface so the task runners, heartbeat lease and cancellation stay backend-agnostic.
+    Implemented by ManagedProcess; the task runners, heartbeat lease and cancellation
+    only depend on this surface.
     """
 
     def start(self) -> None: ...
